@@ -12,14 +12,16 @@
 
 ## 2. Commits in this feature
 
-The work is split into small local commits on `feature/wear-os-offline`; see
-`git log --oneline` for the exact hashes. The intended grouping is:
+The work is split into small local commits on `feature/wear-os-offline`:
 
-1. shared Kotlin protocol package and its tests;
-2. Dart link layer (models, executor, snapshot, phone coordinator) and tests;
-3. Android native transport (GATT server/client, bridge, manifest, permissions);
-4. watch companion UI, phone settings UI, entry point and localisation;
-5. documentation (`ARCHITECTURE.md`, `IMPLEMENTATION_STATUS.md`,
+1. `02b19d3` — shared Kotlin protocol package and its tests;
+2. `c8c944e` — Dart link layer (models, executor, snapshot, phone coordinator)
+   and tests;
+3. `e628a0f` — Android native transport (GATT server/client, bridge, manifest,
+   permissions);
+4. `3a2af70` — watch companion UI, phone settings UI, entry point and
+   localisation;
+5. `12eadc9` — documentation (`ARCHITECTURE.md`, `IMPLEMENTATION_STATUS.md`,
    `BLE_FEASIBILITY.md`, this file).
 
 `analysis_options.yaml` was already modified before this work (two analyzer
@@ -174,7 +176,7 @@ Standalone JVM Gradle project compiled into the app module.
 | Protocol unit tests | `.\android\gradlew.bat -p packages\wear_protocol test` | **BUILD SUCCESSFUL**, 36 tests, 0 failures |
 | Dart Wear tests | `& $FLUTTER test test\wear\` | **28 tests pass** |
 | Static analysis | `& $FLUTTER analyze` | **No issues found!** |
-| Full Flutter suite | `& $FLUTTER test` | **1169 pass / 3 skip / 1 failure** |
+| Full Flutter suite | `& $FLUTTER test` | **1171 pass / 3 skip / 1 failure** |
 | Companion entry bundle | `& $FLUTTER build bundle -t lib\main_wear_companion.dart` | exit 0 |
 | Kotlin app compile | `.\gradlew.bat :app:compileDebugKotlin` | **BUILD SUCCESSFUL** |
 | Release APK | `& $FLUTTER build apk --release` | **SUCCESS**, 114,563,030 bytes |

@@ -88,7 +88,7 @@ validate real BLE peripheral communication regardless.
 | `android\gradlew.bat -p packages/wear_protocol test` | **BUILD SUCCESSFUL**, 36 tests, 0 failures |
 | `flutter test test/wear/` | **28 tests pass** |
 | `flutter analyze` (Flutter 3.41.9) | **No issues found!** |
-| `flutter test` (full suite) | **1169 pass / 3 skip / 1 failure** — the only failure is the pre-existing `test/i18n_test.dart` missing-ARB-keys case (52 keys unrelated to Wear, present in `HEAD`) |
+| `flutter test` (full suite) | **1171 pass / 3 skip / 1 failure** — the only failure is the pre-existing `test/i18n_test.dart` missing-ARB-keys case (52 keys unrelated to Wear, present in `HEAD`) |
 | `flutter build bundle -t lib/main_wear_companion.dart` | exit 0 (companion entry point compiles) |
 | `:app:compileDebugKotlin` | **BUILD SUCCESSFUL** |
 | `flutter build apk --release` | **SUCCESS** — `build\app\outputs\flutter-apk\app-release.apk`, 114,563,030 bytes |
