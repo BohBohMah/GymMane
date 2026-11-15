@@ -15,6 +15,7 @@ import android.view.InputDevice
 import android.view.MotionEvent
 import android.view.ViewConfiguration
 import android.view.WindowManager
+import com.gymmane.app.wear.WearLinkBridge
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.embedding.engine.FlutterShellArgs
@@ -174,6 +175,7 @@ class MainActivity : FlutterActivity() {
         NfcBridge.attach(this, MethodChannel(messenger, NfcBridge.CHANNEL))
         VoiceBridge.attach(this, MethodChannel(messenger, VoiceBridge.CHANNEL))
         WearSurfaces.attach(this, MethodChannel(messenger, WearSurfaces.CHANNEL))
+        WearLinkBridge.attach(this, MethodChannel(messenger, WearLinkBridge.CHANNEL))
     }
 
     private fun currentDisplay(): android.view.Display? =
@@ -269,6 +271,7 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        if (WearLinkBridge.onPermissionResult(requestCode, grantResults)) return
         if (HealthBridge.onPermissionResult(requestCode, grantResults)) return
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
     }
@@ -294,6 +297,7 @@ class MainActivity : FlutterActivity() {
         rotaryChannel = null
         openChannel = null
         NfcBridge.detach(this)
+        WearLinkBridge.detach(this)
         LiveNotifier.dart = null
         HealthBridge.channel = null
         if (isFinishing) LiveNotifier.cancel(this)

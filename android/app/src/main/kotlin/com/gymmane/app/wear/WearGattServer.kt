@@ -1,0 +1,498 @@
+package com.gymmane.app.wear
+
+import android.annotation.SuppressLint
+import android.bluetooth.BluetoothDevice
+import android.bluetooth.BluetoothGatt
+import android.bluetooth.BluetoothGattCharacteristic
+import android.bluetooth.BluetoothGattDescriptor
+import android.bluetooth.BluetoothGattServer
+import android.bluetooth.BluetoothGattServerCallback
+import android.bluetooth.BluetoothGattService
+import android.bluetooth.BluetoothManager
+import android.bluetooth.BluetoothProfile
+import android.bluetooth.BluetoothStatusCodes
+import android.bluetooth.le.AdvertiseCallback
+import android.bluetooth.le.AdvertiseData
+import android.bluetooth.le.AdvertiseSettings
+import android.bluetooth.le.BluetoothLeAdvertiser
+import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import android.os.ParcelUuid
+import com.gymmane.wear.protocol.Chunker
+import com.gymmane.wear.protocol.FrameKind
+import com.gymmane.wear.protocol.FrameReader
+import com.gymmane.wear.protocol.PhoneHandshake
+import com.gymmane.wear.protocol.PhoneHandshakeResult
+import com.gymmane.wear.protocol.SecureSession
+import com.gymmane.wear.protocol.WearJson
+import com.gymmane.wear.protocol.Wire
+import java.time.Instant
+import kotlinx.serialization.json.JsonObject
+
+/**
+ * Phone-side GATT peripheral. It advertises one service, accepts commands on the
+ * RX characteristic and pushes states on TX with indications. The link depends
+ * on OS bonding: every characteristic asks for an encrypted, MITM-protected
+ * peer, and the app adds its own PIN/PSK handshake on top.
+ */
+class WearGattServer(
+    private val context: Context,
+    private val prefs: WearPrefs,
+    private val onEvent: (Map<String, Any?>) -> Unit,
+    private val onCommand: (Map<String, Any?>, (Map<String, Any?>?) -> Unit) -> Unit,
+    private val snapshot: () -> String?,
+) {
+    private val main = Handler(Looper.getMainLooper())
+    private val manager = context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
+
+    private var gattServer: BluetoothGattServer? = null
+    private var advertiser: BluetoothLeAdvertiser? = null
+    private var rx: BluetoothGattCharacteristic? = null
+    private var tx: BluetoothGattCharacteristic? = null
+
+    private var connected: BluetoothDevice? = null
+    private var reader = FrameReader()
+    private var handshake: PhoneHandshake? = null
+    private var session: SecureSession? = null
+    private var mtu = 23
+
+    private val queue = ArrayDeque<ByteArray>()
+    private var sending = false
+    private var closeAfterSend = false
+    private var advertising = false
+    private var lastSnapshot: String? = null
+
+    val supported: Boolean
+        get() = Build.VERSION.SDK_INT >= 31 &&
+            manager?.adapter != null &&
+            context.packageManager.hasSystemFeature(PackageManager.FEATURE_BLUETOOTH_LE)
+
+    private val pairingActive: Boolean
+        get() = System.currentTimeMillis() < prefs.pairingUntil && prefs.pairingPin.isNotEmpty()
+
+    fun start(): Boolean {
+        if (!supported) return false
+        val adapter = manager?.adapter ?: return false
+        if (!adapter.isEnabled) return false
+        if (gattServer != null) {
+            advertise()
+            return true
+        }
+        val open = manager?.openGattServer(context, callback) ?: return false
+        val service = BluetoothGattService(WearUuids.SERVICE, BluetoothGattService.SERVICE_TYPE_PRIMARY)
+        val write = BluetoothGattCharacteristic(
+            WearUuids.RX,
+            BluetoothGattCharacteristic.PROPERTY_WRITE,
+            BluetoothGattCharacteristic.PERMISSION_WRITE_ENCRYPTED_MITM,
+        )
+        val notify = BluetoothGattCharacteristic(
+            WearUuids.TX,
+            BluetoothGattCharacteristic.PROPERTY_INDICATE or BluetoothGattCharacteristic.PROPERTY_READ,
+            BluetoothGattCharacteristic.PERMISSION_READ_ENCRYPTED_MITM,
+        )
+        val cccd = BluetoothGattDescriptor(
+            CCCD,
+            BluetoothGattDescriptor.PERMISSION_READ_ENCRYPTED_MITM or
+                BluetoothGattDescriptor.PERMISSION_WRITE_ENCRYPTED_MITM,
+        )
+        cccd.value = BluetoothGattDescriptor.DISABLE_NOTIFICATION_VALUE
+        notify.addDescriptor(cccd)
+        service.addCharacteristic(write)
+        service.addCharacteristic(notify)
+        if (!open.addService(service)) {
+            open.close()
+            return false
+        }
+        rx = write
+        tx = notify
+        gattServer = open
+        advertise()
+        emit()
+        return true
+    }
+
+    fun stop() {
+        stopAdvertising()
+        session = null
+        handshake = null
+        reader.reset()
+        queue.clear()
+        sending = false
+        closeAfterSend = false
+        val device = connected
+        connected = null
+        if (device != null) runCatching { gattServer?.cancelConnection(device) }
+        runCatching { gattServer?.close() }
+        gattServer = null
+        rx = null
+        tx = null
+        emit()
+    }
+
+    fun startPairing() {
+        if (!start()) return
+        advertise()
+        emit()
+    }
+
+    fun cancelPairing() {
+        prefs.clearPairing()
+        emit()
+    }
+
+    fun updateSnapshot(json: String) {
+        lastSnapshot = json
+        if (session != null) sendState()
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun advertise() {
+        if (!supported || advertising || connected != null) return
+        val adapter = manager?.adapter ?: return
+        if (!adapter.isEnabled) return
+        val le = adapter.bluetoothLeAdvertiser ?: return
+        advertiser = le
+        val settings = AdvertiseSettings.Builder()
+            .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
+            .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_MEDIUM)
+            .setConnectable(true)
+            .setTimeout(0)
+            .build()
+        val data = AdvertiseData.Builder()
+            .addServiceUuid(ParcelUuid(WearUuids.SERVICE))
+            .setIncludeDeviceName(false)
+            .build()
+        advertising = true
+        try {
+            le.startAdvertising(settings, data, advertiseCallback)
+        } catch (_: Exception) {
+            advertising = false
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun stopAdvertising() {
+        if (!advertising) return
+        advertising = false
+        runCatching { advertiser?.stopAdvertising(advertiseCallback) }
+        advertiser = null
+    }
+
+    private val advertiseCallback = object : AdvertiseCallback() {
+        override fun onStartSuccess(settingsInEffect: AdvertiseSettings?) {
+            onMain { advertising = true; emit() }
+        }
+
+        override fun onStartFailure(errorCode: Int) {
+            onMain {
+                advertising = false
+                onEvent(statusMap() + ("error" to "advertise_$errorCode"))
+            }
+        }
+    }
+
+    private fun onMain(block: () -> Unit) {
+        if (Looper.myLooper() == Looper.getMainLooper()) block() else main.post(block)
+    }
+
+    private val callback = object : BluetoothGattServerCallback() {
+        override fun onConnectionStateChange(device: BluetoothDevice, status: Int, newState: Int) {
+            onMain {
+                when (newState) {
+                    BluetoothProfile.STATE_CONNECTED -> onConnected(device)
+                    BluetoothProfile.STATE_DISCONNECTED -> onDisconnected(device)
+                }
+            }
+        }
+
+        override fun onCharacteristicWriteRequest(
+            device: BluetoothDevice,
+            requestId: Int,
+            characteristic: BluetoothGattCharacteristic,
+            preparedWrite: Boolean,
+            responseNeeded: Boolean,
+            offset: Int,
+            value: ByteArray,
+        ) {
+            if (characteristic.uuid != WearUuids.RX) {
+                if (responseNeeded) {
+                    gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_FAILURE, offset, null)
+                }
+                return
+            }
+            if (responseNeeded) {
+                gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, offset, value)
+            }
+            if (preparedWrite || offset != 0) return
+            onMain { handleBytes(value) }
+        }
+
+        override fun onDescriptorWriteRequest(
+            device: BluetoothDevice,
+            requestId: Int,
+            descriptor: BluetoothGattDescriptor,
+            preparedWrite: Boolean,
+            responseNeeded: Boolean,
+            offset: Int,
+            value: ByteArray,
+        ) {
+            if (responseNeeded) {
+                gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, offset, value)
+            }
+        }
+
+        override fun onCharacteristicReadRequest(
+            device: BluetoothDevice,
+            requestId: Int,
+            offset: Int,
+            characteristic: BluetoothGattCharacteristic,
+        ) {
+            gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, offset, ByteArray(0))
+        }
+
+        override fun onMtuChanged(device: BluetoothDevice, mtu: Int) {
+            onMain { this@WearGattServer.mtu = mtu.coerceAtLeast(23) }
+        }
+
+        override fun onNotificationSent(device: BluetoothDevice, status: Int) {
+            onMain {
+                sending = false
+                pump()
+            }
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun onConnected(device: BluetoothDevice) {
+        if (device.bondState != BluetoothDevice.BOND_BONDED) {
+            onEvent(statusMap() + ("error" to "not_bonded"))
+            runCatching { gattServer?.cancelConnection(device) }
+            return
+        }
+        connected = device
+        reader = FrameReader()
+        queue.clear()
+        sending = false
+        closeAfterSend = false
+        mtu = 23
+        handshake = PhoneHandshake(
+            phoneName = phoneName(),
+            pskFor = { prefs.pskFor(it) },
+            pairingPin = { if (pairingActive) prefs.pairingPin else null },
+            onPaired = { id, name, psk -> prefs.savePsk(id, name, psk) },
+        )
+        stopAdvertising()
+        emit()
+    }
+
+    private fun onDisconnected(device: BluetoothDevice) {
+        if (connected?.address != device.address) return
+        connected = null
+        session = null
+        handshake = null
+        reader.reset()
+        queue.clear()
+        sending = false
+        closeAfterSend = false
+        if (prefs.serverEnabled) advertise()
+        emit()
+    }
+
+    private fun handleBytes(bytes: ByteArray) {
+        val frames = try {
+            reader.feed(bytes)
+        } catch (_: Exception) {
+            fail("bad_frame")
+            return
+        }
+        for (frame in frames) {
+            when (frame.kind) {
+                FrameKind.HANDSHAKE -> handleHandshake(frame.payload)
+                FrameKind.SECURE -> handleSecure(frame.payload)
+            }
+        }
+    }
+
+    private fun handleHandshake(payload: ByteArray) {
+        val current = handshake ?: return fail("no_handshake")
+        val message = try {
+            WearJson.parse(payload)
+        } catch (_: Exception) {
+            return fail("bad_handshake")
+        }
+        when (val result = current.onMessage(message)) {
+            is PhoneHandshakeResult.Reply -> {
+                result.messages.forEach { sendHandshake(it) }
+                if (result.close) disconnectWhenDrained()
+            }
+            is PhoneHandshakeResult.Established -> {
+                session = result.session
+                prefs.lastWatchName = result.watchName
+                if (result.pairedNow) prefs.clearPairing()
+                emit()
+                sendState()
+            }
+        }
+    }
+
+    private fun handleSecure(payload: ByteArray) {
+        val current = session ?: return fail("no_session")
+        val envelope = try {
+            WearJson.parse(payload)
+        } catch (_: Exception) {
+            return fail("bad_envelope")
+        }
+        val opened = try {
+            current.open(envelope)
+        } catch (_: Exception) {
+            return fail("bad_mac")
+        }
+        when (opened.type) {
+            "command" -> {
+                val map = WearJson.toMap(opened.data)
+                onCommand(map) { ack ->
+                    onMain {
+                        if (ack != null) {
+                            sendSecure("ack", WearJson.fromAny(ack) as? JsonObject ?: emptyObject())
+                        } else {
+                            sendSecure("ack", ackFor(map, "error"))
+                        }
+                    }
+                }
+            }
+            "bye" -> disconnectWhenDrained()
+        }
+    }
+
+    private fun ackFor(command: Map<String, Any?>, code: String): JsonObject {
+        val id = (command["id"] as? String) ?: ""
+        return WearJson.objectOf {
+            put("id", WearJson.text(id))
+            put("ok", WearJson.bool(false))
+            put("rev", WearJson.number(0))
+            put("code", WearJson.text(code))
+        }
+    }
+
+    private fun emptyObject(): JsonObject = WearJson.objectOf {}
+
+    private fun sendHandshake(message: JsonObject) {
+        sendFrame(FrameKind.HANDSHAKE, message.toString().toByteArray(Charsets.UTF_8))
+    }
+
+    private fun sendSecure(type: String, data: JsonObject) {
+        val current = session ?: return
+        val sealed = try {
+            current.seal(type, data)
+        } catch (_: Exception) {
+            return fail("seal_failed")
+        }
+        sendFrame(FrameKind.SECURE, sealed.toString().toByteArray(Charsets.UTF_8))
+    }
+
+    private fun sendState() {
+        val json = lastSnapshot ?: snapshot() ?: return
+        val data = try {
+            WearJson.parse(json)
+        } catch (_: Exception) {
+            return
+        }
+        sendSecure("state", data)
+    }
+
+    private fun sendFrame(kind: FrameKind, payload: ByteArray) {
+        val frame = try {
+            Wire.encode(kind, payload)
+        } catch (_: Exception) {
+            return
+        }
+        queue.addAll(Chunker.split(frame, (mtu - 3).coerceAtLeast(20)))
+        pump()
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun pump() {
+        if (sending) return
+        val device = connected ?: return
+        val server = gattServer ?: return
+        val characteristic = tx ?: return
+        val chunk = queue.removeFirstOrNull()
+        if (chunk == null) {
+            if (closeAfterSend) {
+                closeAfterSend = false
+                runCatching { server.cancelConnection(device) }
+            }
+            return
+        }
+        sending = true
+        val sent = if (Build.VERSION.SDK_INT >= 33) {
+            server.notifyCharacteristicChanged(device, characteristic, true, chunk) ==
+                BluetoothStatusCodes.SUCCESS
+        } else {
+            @Suppress("DEPRECATION")
+            characteristic.value = chunk
+            @Suppress("DEPRECATION")
+            server.notifyCharacteristicChanged(device, characteristic, true)
+        }
+        if (!sent) {
+            sending = false
+            onEvent(statusMap() + ("error" to "notify_failed"))
+        }
+    }
+
+    private fun disconnectWhenDrained() {
+        closeAfterSend = true
+        if (!sending && queue.isEmpty()) {
+            closeAfterSend = false
+            val device = connected
+            if (device != null) runCatching { gattServer?.cancelConnection(device) }
+        }
+    }
+
+    private fun fail(reason: String) {
+        onEvent(statusMap() + ("error" to reason))
+        disconnectWhenDrained()
+    }
+
+    private fun phoneName(): String = Build.MODEL?.takeIf { it.isNotBlank() } ?: "GymMane Phone"
+
+    fun statusMap(): Map<String, Any?> {
+        val pairing = pairingActive
+        val state = when {
+            !supported -> "unsupported"
+            !prefs.serverEnabled -> "disabled"
+            session != null -> "connected"
+            pairing -> "pairing"
+            connected != null -> "connecting"
+            else -> "idle"
+        }
+        return mapOf(
+            "supported" to supported,
+            "enabled" to prefs.serverEnabled,
+            "state" to state,
+            "deviceName" to prefs.lastWatchName.ifBlank { connectedName() },
+            "address" to (connected?.address ?: ""),
+            "error" to "",
+            "pairingCode" to if (pairing) prefs.pairingPin else "",
+            "pairingUntil" to if (pairing) Instant.ofEpochMilli(prefs.pairingUntil).toString() else "",
+            "sdk" to Build.VERSION.SDK_INT,
+        )
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun connectedName(): String {
+        val device = connected ?: return ""
+        return runCatching { device.name ?: "" }.getOrDefault("")
+    }
+
+    private fun emit() {
+        onEvent(statusMap())
+    }
+
+    companion object {
+        private val CCCD = java.util.UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
+    }
+}

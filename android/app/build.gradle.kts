@@ -19,6 +19,8 @@ android {
     compileSdk = 36
     ndkVersion = flutter.ndkVersion
 
+    sourceSets["main"].java.srcDir("../../packages/wear_protocol/src/main/kotlin")
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -77,6 +79,7 @@ android.applicationVariants.configureEach {
 
 dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
     implementation("androidx.wear.tiles:tiles:1.4.1")
     implementation("androidx.wear.protolayout:protolayout:1.2.1")
     implementation("androidx.wear.watchface:watchface-complications-data-source:1.2.1")
