@@ -82,6 +82,14 @@ class WearGattClient(
 
     fun stop(): Map<String, Any?> {
         prefs.clientEnabled = false
+        return shutdown()
+    }
+
+    /**
+     * Stops for a process/engine teardown without forgetting that the user
+     * enabled the link. The next launch can resume the saved phone.
+     */
+    fun shutdown(): Map<String, Any?> {
         wantConnected = false
         lastError = ""
         main.removeCallbacks(retry)

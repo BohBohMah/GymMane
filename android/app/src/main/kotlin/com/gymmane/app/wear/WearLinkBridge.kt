@@ -85,7 +85,7 @@ object WearLinkBridge {
         if (this.activity !== activity) return
         server?.stop()
         server = null
-        client?.stop()
+        client?.shutdown()
         client = null
         lastJson = null
         pendingResult = null
