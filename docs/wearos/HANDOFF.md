@@ -22,7 +22,9 @@ The work is split into small local commits on `feature/wear-os-offline`:
 4. `3a2af70` — watch companion UI, phone settings UI, entry point and
    localisation;
 5. `12eadc9` — documentation (`ARCHITECTURE.md`, `IMPLEMENTATION_STATUS.md`,
-   `BLE_FEASIBILITY.md`, this file).
+   `BLE_FEASIBILITY.md`, this file);
+6. `7946af0` — keep the watch link preference across engine teardown (a user
+   Disconnect still clears it).
 
 `analysis_options.yaml` was already modified before this work (two analyzer
 excludes added by an earlier `flutter pub get`). It is **not** part of the
@@ -168,6 +170,12 @@ Standalone JVM Gradle project compiled into the app module.
 - Reconnect: the watch client uses exponential backoff (max 30 s) and stops
   auto-retry after an authentication rejection; the user can reconnect from the
   UI. The phone re-advertises when the link is enabled.
+- Lifecycle: closing the watch app calls `WearGattClient.shutdown()`, which
+  stops the radio but keeps `clientEnabled` true, so the next launch resumes the
+  saved phone. An explicit **Disconnect** calls `stop()` and clears it. On the
+  phone, engine teardown calls `WearGattServer.stop()` without clearing
+  `serverEnabled`, so relaunching the app restores the enabled link from
+  `fit.wearLink`.
 
 ## 7. Tests and builds actually run
 

@@ -55,6 +55,10 @@ validate real BLE peripheral communication regardless.
 - Revisions are phone-owned. Rest ticks and clock fields do not bump `rev`;
   rest is sent as a wall-clock `endsAt`. Duplicate command ids are served from a
   bounded ledger.
+- The enabled preference survives app restarts. Closing the watch app stops the
+  radio through `shutdown()` without forgetting the link, while an explicit
+  Disconnect clears it; the phone restores its server from `fit.wearLink` on
+  launch.
 - The shared protocol is a standalone JVM Gradle project compiled into the app
   module. It covers framing/chunking, HKDF/PBKDF2/HMAC, PIN pairing and resume,
   wrong PIN, unauthorized devices, replay, tamper, gap, reflection, session
