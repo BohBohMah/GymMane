@@ -61,6 +61,7 @@ mixin SettingsState on FitCore, ToolsState, LibraryState {
 
   bool voiceCoach = false;
   bool nfcTag = false;
+  bool wearLink = false;
   int deloadEvery = 0;
   DateTime? deloadFrom;
   static const deloadChoices = [0, 4, 5, 6, 8];
@@ -93,6 +94,13 @@ mixin SettingsState on FitCore, ToolsState, LibraryState {
   void setNfcTag(bool on) {
     if (nfcTag == on) return;
     nfcTag = on;
+    _persist();
+    notifyListeners();
+  }
+
+  void setWearLink(bool on) {
+    if (wearLink == on) return;
+    wearLink = on;
     _persist();
     notifyListeners();
   }

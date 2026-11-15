@@ -14359,6 +14359,246 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Also works {muscles}'**
   String alsoWorksMuscles(String muscles);
+
+  /// No description provided for @wearLinkPhoneTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Smartwatch link'**
+  String get wearLinkPhoneTitle;
+
+  /// No description provided for @wearLinkPhoneBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Control the live workout from a paired Wear OS watch over local Bluetooth. Off by default. No internet, no account, no cloud.'**
+  String get wearLinkPhoneBody;
+
+  /// No description provided for @wearLinkPhoneEnable.
+  ///
+  /// In en, this message translates to:
+  /// **'Enable smartwatch link'**
+  String get wearLinkPhoneEnable;
+
+  /// No description provided for @wearLinkPhoneUnsupported.
+  ///
+  /// In en, this message translates to:
+  /// **'Requires Android 12 or newer with Bluetooth LE.'**
+  String get wearLinkPhoneUnsupported;
+
+  /// No description provided for @wearLinkPhoneOff.
+  ///
+  /// In en, this message translates to:
+  /// **'Off'**
+  String get wearLinkPhoneOff;
+
+  /// No description provided for @wearLinkPhoneWaiting.
+  ///
+  /// In en, this message translates to:
+  /// **'Waiting for a paired watch'**
+  String get wearLinkPhoneWaiting;
+
+  /// No description provided for @wearLinkPhoneConnectedTo.
+  ///
+  /// In en, this message translates to:
+  /// **'Connected to {name}'**
+  String wearLinkPhoneConnectedTo(String name);
+
+  /// No description provided for @wearLinkPhonePair.
+  ///
+  /// In en, this message translates to:
+  /// **'PAIR A WATCH'**
+  String get wearLinkPhonePair;
+
+  /// No description provided for @wearLinkPhonePairingTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter this code on the watch'**
+  String get wearLinkPhonePairingTitle;
+
+  /// No description provided for @wearLinkPhonePairingHint.
+  ///
+  /// In en, this message translates to:
+  /// **'The code expires in two minutes.'**
+  String get wearLinkPhonePairingHint;
+
+  /// No description provided for @wearLinkPhoneForget.
+  ///
+  /// In en, this message translates to:
+  /// **'FORGET WATCHES'**
+  String get wearLinkPhoneForget;
+
+  /// No description provided for @wearLinkPhoneForgetBody.
+  ///
+  /// In en, this message translates to:
+  /// **'The watch will need to pair again with a new code.'**
+  String get wearLinkPhoneForgetBody;
+
+  /// No description provided for @wearLinkPhonePermission.
+  ///
+  /// In en, this message translates to:
+  /// **'Bluetooth permission is required.'**
+  String get wearLinkPhonePermission;
+
+  /// No description provided for @wearLinkPhoneError.
+  ///
+  /// In en, this message translates to:
+  /// **'Link error: {code}'**
+  String wearLinkPhoneError(String code);
+
+  /// No description provided for @wearLinkTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Phone link'**
+  String get wearLinkTitle;
+
+  /// No description provided for @wearLinkBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Control the workout running on your phone. Local Bluetooth only.'**
+  String get wearLinkBody;
+
+  /// No description provided for @wearLinkConnect.
+  ///
+  /// In en, this message translates to:
+  /// **'CONNECT PHONE'**
+  String get wearLinkConnect;
+
+  /// No description provided for @wearLinkChoosePhone.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose a phone already paired in system settings.'**
+  String get wearLinkChoosePhone;
+
+  /// No description provided for @wearLinkNoDevices.
+  ///
+  /// In en, this message translates to:
+  /// **'No paired phones. Pair one in the watch Bluetooth settings first.'**
+  String get wearLinkNoDevices;
+
+  /// No description provided for @wearLinkConnecting.
+  ///
+  /// In en, this message translates to:
+  /// **'Connecting…'**
+  String get wearLinkConnecting;
+
+  /// No description provided for @wearLinkOffline.
+  ///
+  /// In en, this message translates to:
+  /// **'Phone not connected'**
+  String get wearLinkOffline;
+
+  /// No description provided for @wearLinkDisconnect.
+  ///
+  /// In en, this message translates to:
+  /// **'DISCONNECT'**
+  String get wearLinkDisconnect;
+
+  /// No description provided for @wearLinkForget.
+  ///
+  /// In en, this message translates to:
+  /// **'FORGET PHONE'**
+  String get wearLinkForget;
+
+  /// No description provided for @wearLinkPinTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter the code shown on the phone'**
+  String get wearLinkPinTitle;
+
+  /// No description provided for @wearLinkPinHint.
+  ///
+  /// In en, this message translates to:
+  /// **'6-digit code'**
+  String get wearLinkPinHint;
+
+  /// No description provided for @wearLinkConfirm.
+  ///
+  /// In en, this message translates to:
+  /// **'CONFIRM'**
+  String get wearLinkConfirm;
+
+  /// No description provided for @wearLinkNoWorkout.
+  ///
+  /// In en, this message translates to:
+  /// **'No workout running on the phone'**
+  String get wearLinkNoWorkout;
+
+  /// No description provided for @wearLinkRefresh.
+  ///
+  /// In en, this message translates to:
+  /// **'REFRESH'**
+  String get wearLinkRefresh;
+
+  /// No description provided for @wearLinkWaiting.
+  ///
+  /// In en, this message translates to:
+  /// **'Waiting for the phone…'**
+  String get wearLinkWaiting;
+
+  /// No description provided for @wearLinkSaved.
+  ///
+  /// In en, this message translates to:
+  /// **'Saved on phone'**
+  String get wearLinkSaved;
+
+  /// No description provided for @wearLinkNotSaved.
+  ///
+  /// In en, this message translates to:
+  /// **'Not saved on phone'**
+  String get wearLinkNotSaved;
+
+  /// No description provided for @wearLinkComplete.
+  ///
+  /// In en, this message translates to:
+  /// **'COMPLETE SET'**
+  String get wearLinkComplete;
+
+  /// No description provided for @wearLinkPrev.
+  ///
+  /// In en, this message translates to:
+  /// **'PREVIOUS SET'**
+  String get wearLinkPrev;
+
+  /// No description provided for @wearLinkSets.
+  ///
+  /// In en, this message translates to:
+  /// **'{done}/{total} sets'**
+  String wearLinkSets(int done, int total);
+
+  /// No description provided for @wearLinkUnsupported.
+  ///
+  /// In en, this message translates to:
+  /// **'This device does not support the local link.'**
+  String get wearLinkUnsupported;
+
+  /// No description provided for @wearLinkPermission.
+  ///
+  /// In en, this message translates to:
+  /// **'Bluetooth permission is required.'**
+  String get wearLinkPermission;
+
+  /// No description provided for @wearLinkLinkedTo.
+  ///
+  /// In en, this message translates to:
+  /// **'Linked to {name}'**
+  String wearLinkLinkedTo(String name);
+
+  /// No description provided for @wearLinkSessionDone.
+  ///
+  /// In en, this message translates to:
+  /// **'Workout complete'**
+  String get wearLinkSessionDone;
+
+  /// No description provided for @wearLinkSet.
+  ///
+  /// In en, this message translates to:
+  /// **'SET'**
+  String get wearLinkSet;
+
+  /// No description provided for @wearLinkPinWrong.
+  ///
+  /// In en, this message translates to:
+  /// **'Wrong code'**
+  String get wearLinkPinWrong;
 }
 
 class _AppLocalizationsDelegate extends LocalizationsDelegate<AppLocalizations> {

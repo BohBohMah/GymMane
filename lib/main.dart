@@ -17,6 +17,8 @@ import 'services/graphics_mode.dart';
 import 'services/rest_alarm.dart';
 import 'services/screen_awake.dart';
 import 'state/fit_state.dart';
+import 'wear/link/wear_link_client.dart';
+import 'wear/link/wear_link_server.dart';
 import 'wear/wear_app.dart';
 import 'wear/wear_surfaces.dart';
 
@@ -51,6 +53,7 @@ Future<void> main() async {
 
   if (watch) {
     WearSurfaces.watch();
+    WearLinkClient.instance.attach();
     runApp(const WearApp());
     return;
   }
@@ -58,6 +61,7 @@ Future<void> main() async {
   fit.onWidgetsShouldUpdate = HomeWidgetBridge.update;
   NutritionWidgets.watch(HomeWidgetBridge.update);
   AutoBackup.instance.init();
+  WearLinkServer.instance.attach();
   runApp(const GymManeApp());
 
   WidgetsBinding.instance.addPostFrameCallback((_) => HomeWidgetBridge.update());

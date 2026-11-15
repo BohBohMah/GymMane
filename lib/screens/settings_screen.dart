@@ -38,6 +38,7 @@ import '../widgets/auto_backup_sheet.dart';
 import '../widgets/body_rulers.dart';
 import '../widgets/dialogs.dart';
 import '../widgets/entrance.dart';
+import '../wear/companion/wear_link_settings.dart';
 import '../widgets/file_thumb.dart';
 import '../widgets/glass.dart';
 import '../widgets/health_cards.dart';
@@ -135,6 +136,8 @@ class SettingsScreen extends StatelessWidget {
 
   List<Widget> _sectionBody(BuildContext context, GymColors gc, String id) {
     switch (id) {
+      case 'wear':
+        return [const WearLinkSettings()];
       case 'general':
         return [
           _card(gc, [
@@ -862,6 +865,7 @@ class SettingsScreen extends StatelessWidget {
         'home' => t.sectionHome,
         'widgets' => t.sectionWidgets,
         'beta' => t.sectionBeta,
+        'wear' => t.wearLinkPhoneTitle,
         'data' => t.sectionData,
         'about' => t.aboutGymmane,
         _ => titleCase(t.support),
@@ -940,6 +944,9 @@ class SettingsScreen extends StatelessWidget {
         ]),
       _Category('beta', PhosphorIconsRegular.flask, _sectionTitle('beta'), [
         (t.nutritionBeta, PhosphorIconsRegular.forkKnife),
+      ]),
+      _Category('wear', PhosphorIconsRegular.watch, _sectionTitle('wear'), [
+        (t.wearLinkPhoneTitle, PhosphorIconsRegular.watch),
       ]),
       _Category('data', PhosphorIconsRegular.database, _sectionTitle('data'), [
         (t.exportCsv, PhosphorIconsRegular.fileCsv),

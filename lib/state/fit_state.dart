@@ -327,6 +327,7 @@ class FitState extends FitCore
     muscleTune = data['mTune'] as bool? ?? true;
     voiceCoach = data['voice'] as bool? ?? false;
     nfcTag = data['nfc'] as bool? ?? false;
+    wearLink = data['wearLink'] as bool? ?? false;
     final every = (data['deload'] as num?)?.toInt() ?? 0;
     deloadEvery = SettingsState.deloadChoices.contains(every) ? every : 0;
     deloadFrom = deloadEvery > 0 ? DateTime.tryParse((data['deloadFrom'] as String?) ?? '') ?? DateTime.now() : null;
@@ -599,6 +600,7 @@ class FitState extends FitCore
         if (!muscleTune) 'mTune': false,
         if (voiceCoach) 'voice': true,
         if (nfcTag) 'nfc': true,
+        if (wearLink) 'wearLink': true,
         if (deloadEvery > 0) 'deload': deloadEvery,
         if (deloadFrom != null) 'deloadFrom': deloadFrom!.toIso8601String(),
         if (lowEndAsked) 'lowEndAsked': true,
@@ -837,6 +839,7 @@ class FitState extends FitCore
     trainReminderMin = null;
     smartReminder = false;
     trainAgainMin = 0;
+    wearLink = false;
     TrainReminder.instance.cancel();
     onboarded = false;
     strengthExerciseId = null;

@@ -8107,4 +8107,133 @@ class AppLocalizationsFa extends AppLocalizations {
   String alsoWorksMuscles(String muscles) {
     return 'Also works $muscles';
   }
+
+  @override
+  String get wearLinkPhoneTitle => 'Smartwatch link';
+
+  @override
+  String get wearLinkPhoneBody =>
+      'Control the live workout from a paired Wear OS watch over local Bluetooth. Off by default. No internet, no account, no cloud.';
+
+  @override
+  String get wearLinkPhoneEnable => 'Enable smartwatch link';
+
+  @override
+  String get wearLinkPhoneUnsupported => 'Requires Android 12 or newer with Bluetooth LE.';
+
+  @override
+  String get wearLinkPhoneOff => 'Off';
+
+  @override
+  String get wearLinkPhoneWaiting => 'Waiting for a paired watch';
+
+  @override
+  String wearLinkPhoneConnectedTo(String name) {
+    return 'Connected to $name';
+  }
+
+  @override
+  String get wearLinkPhonePair => 'PAIR A WATCH';
+
+  @override
+  String get wearLinkPhonePairingTitle => 'Enter this code on the watch';
+
+  @override
+  String get wearLinkPhonePairingHint => 'The code expires in two minutes.';
+
+  @override
+  String get wearLinkPhoneForget => 'FORGET WATCHES';
+
+  @override
+  String get wearLinkPhoneForgetBody => 'The watch will need to pair again with a new code.';
+
+  @override
+  String get wearLinkPhonePermission => 'Bluetooth permission is required.';
+
+  @override
+  String wearLinkPhoneError(String code) {
+    return 'Link error: $code';
+  }
+
+  @override
+  String get wearLinkTitle => 'Phone link';
+
+  @override
+  String get wearLinkBody => 'Control the workout running on your phone. Local Bluetooth only.';
+
+  @override
+  String get wearLinkConnect => 'CONNECT PHONE';
+
+  @override
+  String get wearLinkChoosePhone => 'Choose a phone already paired in system settings.';
+
+  @override
+  String get wearLinkNoDevices => 'No paired phones. Pair one in the watch Bluetooth settings first.';
+
+  @override
+  String get wearLinkConnecting => 'Connecting…';
+
+  @override
+  String get wearLinkOffline => 'Phone not connected';
+
+  @override
+  String get wearLinkDisconnect => 'DISCONNECT';
+
+  @override
+  String get wearLinkForget => 'FORGET PHONE';
+
+  @override
+  String get wearLinkPinTitle => 'Enter the code shown on the phone';
+
+  @override
+  String get wearLinkPinHint => '6-digit code';
+
+  @override
+  String get wearLinkConfirm => 'CONFIRM';
+
+  @override
+  String get wearLinkNoWorkout => 'No workout running on the phone';
+
+  @override
+  String get wearLinkRefresh => 'REFRESH';
+
+  @override
+  String get wearLinkWaiting => 'Waiting for the phone…';
+
+  @override
+  String get wearLinkSaved => 'Saved on phone';
+
+  @override
+  String get wearLinkNotSaved => 'Not saved on phone';
+
+  @override
+  String get wearLinkComplete => 'COMPLETE SET';
+
+  @override
+  String get wearLinkPrev => 'PREVIOUS SET';
+
+  @override
+  String wearLinkSets(int done, int total) {
+    return '$done/$total sets';
+  }
+
+  @override
+  String get wearLinkUnsupported => 'This device does not support the local link.';
+
+  @override
+  String get wearLinkPermission => 'Bluetooth permission is required.';
+
+  @override
+  String wearLinkLinkedTo(String name) {
+    return 'Linked to $name';
+  }
+
+  @override
+  String get wearLinkSessionDone => 'Workout complete';
+
+  @override
+  String get wearLinkSet => 'SET';
+
+  @override
+  String get wearLinkPinWrong => 'Wrong code';
 }

@@ -15,6 +15,7 @@ import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
 import '../widgets/timer_panel.dart';
 import '../widgets/ui_kit.dart' show sentenceCase;
+import 'companion/wear_link_screen.dart';
 
 class WearRotary {
   WearRotary._();
@@ -244,6 +245,8 @@ class _WearShellState extends State<WearShell> with WidgetsBindingObserver {
         return WearRoutines();
       case 'settings':
         return WearSettings();
+      case 'link':
+        return const WearLinkScreen();
       default:
         return WearHome();
     }
@@ -792,6 +795,12 @@ class WearSettings extends StatelessWidget {
             ]),
           ),
         ),
+      ),
+      const SizedBox(height: 12),
+      WearButton(
+        label: t.wearLinkTitle,
+        icon: PhosphorIconsRegular.watch,
+        onTap: () => fit.pushRoute('link'),
       ),
     ]);
   }
