@@ -62,6 +62,9 @@ class FrameReader {
 }
 
 object Chunker {
+    /** ATT limits an attribute value to 512 bytes even when MTU - 3 is larger. */
+    fun gattPayloadSize(mtu: Int): Int = (mtu.coerceAtLeast(23) - 3).coerceAtMost(512)
+
     fun split(bytes: ByteArray, chunkSize: Int): List<ByteArray> {
         if (bytes.isEmpty()) return emptyList()
         val size = chunkSize.coerceAtLeast(20)

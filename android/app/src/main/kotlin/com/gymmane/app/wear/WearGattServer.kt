@@ -63,6 +63,7 @@ class WearGattServer(
     private var sending = false
     private var closeAfterSend = false
     private var advertising = false
+    private var serviceReady = false
     private var lastSnapshot: String? = null
 
     val supported: Boolean
@@ -74,11 +75,20 @@ class WearGattServer(
         get() = System.currentTimeMillis() < prefs.pairingUntil && prefs.pairingPin.isNotEmpty()
 
     fun start(): Boolean {
-        if (!supported) return false
-        val adapter = manager?.adapter ?: return false
-        if (!adapter.isEnabled) return false
+        if (!supported) {
+            WearLinkDiagnostics.log("phone server start unsupported")
+            return false
+        }
+        val adapter = manager?.adapter ?: run {
+            WearLinkDiagnostics.log("phone server start no_adapter")
+            return false
+        }
+        if (!adapter.isEnabled) {
+            WearLinkDiagnostics.log("phone server start bluetooth_off")
+            return false
+        }
         if (gattServer != null) {
-            advertise()
+            if (serviceReady) advertise()
             return true
         }
         val open = manager?.openGattServer(context, callback) ?: return false
@@ -103,13 +113,14 @@ class WearGattServer(
         service.addCharacteristic(write)
         service.addCharacteristic(notify)
         if (!open.addService(service)) {
+            WearLinkDiagnostics.log("phone server add_service_failed")
             open.close()
             return false
         }
         rx = write
         tx = notify
         gattServer = open
-        advertise()
+        WearLinkDiagnostics.log("phone server opened; waiting for service registration")
         emit()
         return true
     }
@@ -127,6 +138,7 @@ class WearGattServer(
         if (device != null) runCatching { gattServer?.cancelConnection(device) }
         runCatching { gattServer?.close() }
         gattServer = null
+        serviceReady = false
         rx = null
         tx = null
         emit()
@@ -145,12 +157,16 @@ class WearGattServer(
 
     fun updateSnapshot(json: String) {
         lastSnapshot = json
+        WearLinkDiagnostics.log(
+            "phone native snapshot ${WearLinkDiagnostics.snapshotSummary(json)} " +
+                "gattSession=${session != null} connected=${connected != null}",
+        )
         if (session != null) sendState()
     }
 
     @SuppressLint("MissingPermission")
     private fun advertise() {
-        if (!supported || advertising || connected != null) return
+        if (!supported || !serviceReady || advertising || connected != null) return
         val adapter = manager?.adapter ?: return
         if (!adapter.isEnabled) return
         val le = adapter.bluetoothLeAdvertiser ?: return
@@ -183,12 +199,17 @@ class WearGattServer(
 
     private val advertiseCallback = object : AdvertiseCallback() {
         override fun onStartSuccess(settingsInEffect: AdvertiseSettings?) {
-            onMain { advertising = true; emit() }
+            onMain {
+                advertising = true
+                WearLinkDiagnostics.log("phone advertising started")
+                emit()
+            }
         }
 
         override fun onStartFailure(errorCode: Int) {
             onMain {
                 advertising = false
+                WearLinkDiagnostics.log("phone advertising failed code=$errorCode")
                 onEvent(statusMap() + ("error" to "advertise_$errorCode"))
             }
         }
@@ -199,8 +220,27 @@ class WearGattServer(
     }
 
     private val callback = object : BluetoothGattServerCallback() {
+        override fun onServiceAdded(status: Int, service: BluetoothGattService) {
+            onMain {
+                if (service.uuid != WearUuids.SERVICE || gattServer == null) return@onMain
+                if (status != BluetoothGatt.GATT_SUCCESS) {
+                    WearLinkDiagnostics.log("phone service registration failed status=$status")
+                    onEvent(statusMap() + ("error" to "service_$status"))
+                    stop()
+                    return@onMain
+                }
+                serviceReady = true
+                advertise()
+                emit()
+            }
+        }
+
         override fun onConnectionStateChange(device: BluetoothDevice, status: Int, newState: Int) {
             onMain {
+                WearLinkDiagnostics.log(
+                    "phone GATT connection status=$status " +
+                        "state=${if (newState == BluetoothProfile.STATE_CONNECTED) "connected" else "disconnected"}",
+                )
                 when (newState) {
                     BluetoothProfile.STATE_CONNECTED -> onConnected(device)
                     BluetoothProfile.STATE_DISCONNECTED -> onDisconnected(device)
@@ -260,6 +300,14 @@ class WearGattServer(
         override fun onNotificationSent(device: BluetoothDevice, status: Int) {
             onMain {
                 sending = false
+                WearLinkDiagnostics.log(
+                    "phone indication completed status=$status remainingChunks=${queue.size}",
+                )
+                if (status != BluetoothGatt.GATT_SUCCESS) {
+                    queue.clear()
+                    fail("indication_$status")
+                    return@onMain
+                }
                 pump()
             }
         }
@@ -269,6 +317,10 @@ class WearGattServer(
     private fun onConnected(device: BluetoothDevice) {
         if (device.bondState != BluetoothDevice.BOND_BONDED) {
             onEvent(statusMap() + ("error" to "not_bonded"))
+            runCatching { gattServer?.cancelConnection(device) }
+            return
+        }
+        if (connected != null && connected?.address != device.address) {
             runCatching { gattServer?.cancelConnection(device) }
             return
         }
@@ -298,6 +350,7 @@ class WearGattServer(
         sending = false
         closeAfterSend = false
         if (prefs.serverEnabled) advertise()
+        WearLinkDiagnostics.log("phone GATT peer disconnected; advertising=${prefs.serverEnabled}")
         emit()
     }
 
@@ -309,6 +362,9 @@ class WearGattServer(
             return
         }
         for (frame in frames) {
+            WearLinkDiagnostics.log(
+                "phone received frame kind=${frame.kind} bytes=${frame.payload.size}",
+            )
             when (frame.kind) {
                 FrameKind.HANDSHAKE -> handleHandshake(frame.payload)
                 FrameKind.SECURE -> handleSecure(frame.payload)
@@ -325,6 +381,7 @@ class WearGattServer(
         }
         when (val result = current.onMessage(message)) {
             is PhoneHandshakeResult.Reply -> {
+                WearLinkDiagnostics.log("phone handshake reply messages=${result.messages.size} close=${result.close}")
                 result.messages.forEach { sendHandshake(it) }
                 if (result.close) disconnectWhenDrained()
             }
@@ -332,6 +389,10 @@ class WearGattServer(
                 session = result.session
                 prefs.lastWatchName = result.watchName
                 if (result.pairedNow) prefs.clearPairing()
+                WearLinkDiagnostics.log(
+                    "phone handshake established pairedNow=${result.pairedNow} " +
+                        "snapshotAvailable=${lastSnapshot != null}",
+                )
                 emit()
                 sendState()
             }
@@ -353,9 +414,17 @@ class WearGattServer(
         when (opened.type) {
             "command" -> {
                 val map = WearJson.toMap(opened.data)
+                val commandSession = current
+                WearLinkDiagnostics.log(
+                    "phone received command action=${map["action"] as? String ?: "unknown"}",
+                )
                 onCommand(map) { ack ->
                     onMain {
+                        if (session !== commandSession) return@onMain
                         if (ack != null) {
+                            WearLinkDiagnostics.log(
+                                "phone command ack ok=${ack["ok"]} code=${ack["code"]} rev=${ack["rev"]}",
+                            )
                             sendSecure("ack", WearJson.fromAny(ack) as? JsonObject ?: emptyObject())
                         } else {
                             sendSecure("ack", ackFor(map, "error"))
@@ -394,12 +463,17 @@ class WearGattServer(
     }
 
     private fun sendState() {
-        val json = lastSnapshot ?: snapshot() ?: return
+        val json = lastSnapshot ?: snapshot() ?: run {
+            WearLinkDiagnostics.log("phone state send skipped: no snapshot")
+            return
+        }
         val data = try {
             WearJson.parse(json)
         } catch (_: Exception) {
+            WearLinkDiagnostics.log("phone state send failed: snapshot parse")
             return
         }
+        WearLinkDiagnostics.log("phone sending state ${WearLinkDiagnostics.snapshotSummary(json)}")
         sendSecure("state", data)
     }
 
@@ -409,7 +483,7 @@ class WearGattServer(
         } catch (_: Exception) {
             return
         }
-        queue.addAll(Chunker.split(frame, (mtu - 3).coerceAtLeast(20)))
+        queue.addAll(Chunker.split(frame, Chunker.gattPayloadSize(mtu)))
         pump()
     }
 
@@ -428,18 +502,26 @@ class WearGattServer(
             return
         }
         sending = true
-        val sent = if (Build.VERSION.SDK_INT >= 33) {
-            server.notifyCharacteristicChanged(device, characteristic, true, chunk) ==
-                BluetoothStatusCodes.SUCCESS
-        } else {
-            @Suppress("DEPRECATION")
-            characteristic.value = chunk
-            @Suppress("DEPRECATION")
-            server.notifyCharacteristicChanged(device, characteristic, true)
+        val sent = try {
+            if (Build.VERSION.SDK_INT >= 33) {
+                server.notifyCharacteristicChanged(device, characteristic, true, chunk) ==
+                    BluetoothStatusCodes.SUCCESS
+            } else {
+                @Suppress("DEPRECATION")
+                characteristic.value = chunk
+                @Suppress("DEPRECATION")
+                server.notifyCharacteristicChanged(device, characteristic, true)
+            }
+        } catch (_: Exception) {
+            false
         }
         if (!sent) {
             sending = false
-            onEvent(statusMap() + ("error" to "notify_failed"))
+            WearLinkDiagnostics.log("phone indication start failed queued=${queue.size}")
+            queue.clear()
+            fail("notify_failed")
+        } else {
+            WearLinkDiagnostics.log("phone indication started queued=${queue.size}")
         }
     }
 

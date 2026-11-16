@@ -115,6 +115,7 @@ class WearGattClient(
     }
 
     fun requestState() {
+        WearLinkDiagnostics.log("watch sending requestState")
         sendCommand(
             mapOf(
                 "id" to UUID.randomUUID().toString(),
@@ -245,6 +246,10 @@ class WearGattClient(
                     runCatching { gatt.close() }
                     return@onMain
                 }
+                WearLinkDiagnostics.log(
+                    "watch GATT connection status=$status " +
+                        "state=${if (newState == BluetoothProfile.STATE_CONNECTED) "connected" else "disconnected"}",
+                )
                 if (status == BluetoothGatt.GATT_SUCCESS && newState == BluetoothProfile.STATE_CONNECTED) {
                     retryAttempt = 0
                     lastError = ""
@@ -274,6 +279,7 @@ class WearGattClient(
                 if (status == BluetoothGatt.GATT_SUCCESS) {
                     this@WearGattClient.mtu = mtu.coerceAtLeast(23)
                 }
+                WearLinkDiagnostics.log("watch MTU callback status=$status mtu=$mtu effective=${this@WearGattClient.mtu}")
                 discover(gatt)
             }
         }
@@ -281,12 +287,22 @@ class WearGattClient(
         override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
             onMain {
                 if (gatt !== this@WearGattClient.gatt) return@onMain
-                if (status != BluetoothGatt.GATT_SUCCESS) return@onMain fail("discover_$status")
+                if (status != BluetoothGatt.GATT_SUCCESS) {
+                    WearLinkDiagnostics.log("watch service discovery failed status=$status")
+                    return@onMain fail("discover_$status")
+                }
                 val service: BluetoothGattService? = gatt.getService(WearUuids.SERVICE)
-                if (service == null) return@onMain fail("service_missing")
+                if (service == null) {
+                    WearLinkDiagnostics.log("watch service discovery missing_service")
+                    return@onMain fail("service_missing")
+                }
                 val write = service.getCharacteristic(WearUuids.RX)
                 val read = service.getCharacteristic(WearUuids.TX)
-                if (write == null || read == null) return@onMain fail("characteristic_missing")
+                if (write == null || read == null) {
+                    WearLinkDiagnostics.log("watch service discovery missing_characteristic")
+                    return@onMain fail("characteristic_missing")
+                }
+                WearLinkDiagnostics.log("watch service discovered; enabling indications")
                 rx = write
                 tx = read
                 if (!gatt.setCharacteristicNotification(read, true)) {
@@ -309,8 +325,12 @@ class WearGattClient(
             onMain {
                 if (gatt !== this@WearGattClient.gatt) return@onMain
                 if (descriptor.uuid != CCCD) return@onMain
-                if (status != BluetoothGatt.GATT_SUCCESS) return@onMain fail("cccd_$status")
+                if (status != BluetoothGatt.GATT_SUCCESS) {
+                    WearLinkDiagnostics.log("watch indication subscription failed status=$status")
+                    return@onMain fail("cccd_$status")
+                }
                 indicationReady = true
+                WearLinkDiagnostics.log("watch indications enabled; starting handshake")
                 beginHandshake()
             }
         }
@@ -341,7 +361,7 @@ class WearGattClient(
             }
         }
 
-        override fun onCharacteristicWrite(
+    override fun onCharacteristicWrite(
             gatt: BluetoothGatt,
             characteristic: BluetoothGattCharacteristic,
             status: Int,
@@ -349,7 +369,10 @@ class WearGattClient(
             onMain {
                 if (gatt !== this@WearGattClient.gatt) return@onMain
                 sending = false
-                if (status != BluetoothGatt.GATT_SUCCESS) return@onMain fail("write_$status")
+                if (status != BluetoothGatt.GATT_SUCCESS) {
+                    WearLinkDiagnostics.log("watch write callback failed status=$status")
+                    return@onMain fail("write_$status")
+                }
                 pump()
             }
         }
@@ -363,6 +386,7 @@ class WearGattClient(
     }
 
     private fun beginHandshake() {
+        WearLinkDiagnostics.log("watch handshake start hasStoredKey=${prefs.watchPsk != null}")
         val watch = WatchHandshake(
             watchId = prefs.watchId,
             watchName = prefs.watchName,
@@ -380,6 +404,9 @@ class WearGattClient(
             return fail("bad_frame")
         }
         for (frame in frames) {
+            WearLinkDiagnostics.log(
+                "watch received frame kind=${frame.kind} bytes=${frame.payload.size}",
+            )
             when (frame.kind) {
                 FrameKind.HANDSHAKE -> handleHandshake(frame.payload)
                 FrameKind.SECURE -> handleSecure(frame.payload)
@@ -396,17 +423,22 @@ class WearGattClient(
         }
         when (val result = current.onMessage(message)) {
             is WatchHandshakeResult.Reply -> result.messages.forEach { sendHandshake(it) }
-            is WatchHandshakeResult.NeedPin -> onPinRequired(result.phoneName)
+            is WatchHandshakeResult.NeedPin -> {
+                WearLinkDiagnostics.log("watch handshake requires first-pair PIN")
+                onPinRequired(result.phoneName)
+            }
             is WatchHandshakeResult.Ready -> {
                 session = result.session
                 sendHandshake(result.confirm)
                 lastError = ""
+                WearLinkDiagnostics.log("watch handshake ready; requesting state")
                 emit()
                 requestState()
             }
             is WatchHandshakeResult.Rejected -> {
                 lastError = "rejected_${result.reason}"
                 wantConnected = false
+                WearLinkDiagnostics.log("watch handshake rejected reason=${result.reason}")
                 emit()
                 disconnect()
             }
@@ -426,8 +458,18 @@ class WearGattClient(
             return fail("bad_mac")
         }
         when (opened.type) {
-            "state" -> onState(WearJson.toMap(opened.data))
-            "ack" -> onAck(WearJson.toMap(opened.data))
+            "state" -> {
+                val data = WearJson.toMap(opened.data)
+                WearLinkDiagnostics.log("watch received state ${WearLinkDiagnostics.snapshotSummary(data)}")
+                onState(data)
+            }
+            "ack" -> {
+                val data = WearJson.toMap(opened.data)
+                WearLinkDiagnostics.log(
+                    "watch received ack ok=${data["ok"]} code=${data["code"]} rev=${data["rev"]}",
+                )
+                onAck(data)
+            }
         }
     }
 
@@ -451,7 +493,7 @@ class WearGattClient(
         } catch (_: Exception) {
             return fail("frame_too_large")
         }
-        queue.addAll(Chunker.split(frame, (mtu - 3).coerceAtLeast(20)))
+        queue.addAll(Chunker.split(frame, Chunker.gattPayloadSize(mtu)))
         pump()
     }
 
@@ -479,12 +521,16 @@ class WearGattClient(
         }
         if (!ok) {
             sending = false
+            WearLinkDiagnostics.log("watch write start failed queued=${queue.size}")
             fail("write_failed")
+        } else {
+            WearLinkDiagnostics.log("watch write started queued=${queue.size}")
         }
     }
 
     private fun fail(reason: String) {
         lastError = reason
+        WearLinkDiagnostics.log("watch GATT client error=$reason")
         emit()
         disconnect()
         scheduleRetry()

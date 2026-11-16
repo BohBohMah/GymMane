@@ -99,6 +99,7 @@ class RemoteWorkout {
     this.rest,
     this.summary,
     this.pausedAt,
+    this.effortMode = '',
   });
 
   final int rev;
@@ -114,6 +115,7 @@ class RemoteWorkout {
   final RemoteSummary? summary;
   final DateTime serverNow;
   final DateTime? pausedAt;
+  final String effortMode;
 
   bool get hasWorkout => workoutId != null && status != RemoteStatus.idle;
   bool get finished => status == RemoteStatus.complete;
@@ -128,10 +130,9 @@ class RemoteWorkout {
   int get totalSets => exercises.fold(0, (sum, e) => sum + e.sets.length);
 
   int get liveElapsedSeconds {
-    if (status != RemoteStatus.active || startedAt == null) return elapsedSeconds;
-    final since = serverNow.difference(startedAt!).inSeconds;
+    if (status != RemoteStatus.active) return elapsedSeconds;
     final live = elapsedSeconds + DateTime.now().difference(serverNow).inSeconds;
-    return live < since ? live : since;
+    return live < 0 ? 0 : live;
   }
 
   static RemoteWorkout fromJson(Map<String, dynamic> json) {
@@ -142,13 +143,18 @@ class RemoteWorkout {
       'complete' => RemoteStatus.complete,
       _ => RemoteStatus.idle,
     };
-    final restJson = json['rest'] as Map<String, dynamic>?;
-    final summaryJson = json['summary'] as Map<String, dynamic>?;
+    final restJson = json['rest'] as Map?;
+    final summaryJson = json['summary'] as Map?;
     return RemoteWorkout(
       rev: (json['rev'] as num?)?.toInt() ?? 0,
       bootId: json['bootId'] as String? ?? '',
       workoutId: json['workoutId'] as String?,
       status: status,
+      effortMode: switch (json['effortMode']) {
+        'rpe' => 'rpe',
+        'rir' => 'rir',
+        _ => '',
+      },
       name: json['name'] as String? ?? 'GymMane',
       startedAt: DateTime.tryParse(json['startedAt'] as String? ?? ''),
       elapsedSeconds: (json['elapsedSec'] as num?)?.toInt() ?? 0,

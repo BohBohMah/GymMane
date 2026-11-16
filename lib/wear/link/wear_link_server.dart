@@ -8,6 +8,7 @@ import '../../state/fit_state.dart';
 import 'fit_wear_workout_api.dart';
 import 'wear_command.dart';
 import 'wear_command_executor.dart';
+import 'wear_link_diagnostics.dart';
 import 'wear_link_status.dart';
 import 'wear_snapshot.dart';
 
@@ -29,6 +30,7 @@ class WearLinkServer {
   WearSnapshot? _lastSnapshot;
   bool _attached = false;
   bool _applying = false;
+  bool _dirtyWhileApplying = false;
   Future<int>? _pushTask;
 
   bool get _supported => !kIsWeb && Platform.isAndroid;
@@ -40,6 +42,10 @@ class WearLinkServer {
     }
     if (_attached) return;
     _attached = true;
+    wearLinkDiagnostic(
+      'phone attach enabled=${fit.wearLink} route=${fit.route} '
+      'hasSession=${fit.session != null}',
+    );
     _channel.setMethodCallHandler(_onNativeCall);
     fit.addListener(_onFit);
     if (fit.wearLink) _start();
@@ -51,7 +57,13 @@ class WearLinkServer {
         return _onCommand(call.arguments);
       case 'linkEvent':
         final raw = call.arguments;
-        if (raw is Map) status.value = WearLinkStatus.fromMap(raw);
+        if (raw is Map) {
+          status.value = WearLinkStatus.fromMap(raw);
+          wearLinkDiagnostic(
+            'phone native event state=${status.value.state.name} '
+            'enabled=${status.value.enabled} error=${status.value.error}',
+          );
+        }
         return null;
       case 'stateRequested':
         return _lastSnapshot?.encode();
@@ -67,12 +79,11 @@ class WearLinkServer {
     final known = _ledger.fetch(command.id);
     if (known != null) return known.toJson();
 
+    wearLinkDiagnostic('phone command action=${command.action} rev=$_rev');
     _applying = true;
     try {
       final execution = _executor.execute(command, _rev);
-      final rev = execution.changed || command.action == 'requestState'
-          ? await _push(force: true)
-          : _rev;
+      final rev = execution.changed || command.action == 'requestState' ? await _push(force: true) : _rev;
       final ack = WearAck(
         id: command.id,
         ok: execution.ok,
@@ -81,20 +92,40 @@ class WearLinkServer {
         message: execution.message,
       );
       _ledger.remember(ack);
+      wearLinkDiagnostic(
+        'phone command result action=${command.action} '
+        'ok=${ack.ok} code=${ack.code} rev=${ack.rev}',
+      );
       return ack.toJson();
     } finally {
       _applying = false;
+      if (_dirtyWhileApplying) {
+        _dirtyWhileApplying = false;
+        _push();
+      }
     }
   }
 
   void _onFit() {
-    if (!fit.wearLink || _applying) return;
+    if (!fit.wearLink || _applying) {
+      if (_applying && fit.wearLink) _dirtyWhileApplying = true;
+      wearLinkDiagnostic('phone fit change skipped enabled=${fit.wearLink} applying=$_applying');
+      return;
+    }
+    wearLinkDiagnostic(
+      'phone fit change route=${fit.route} hasSession=${fit.session != null} '
+      'complete=${fit.session?.complete ?? false}',
+    );
     _push();
   }
 
   Future<void> _start() async {
     final result = await _invokeWithPermission('startServer');
     status.value = WearLinkStatus.fromMap(result);
+    wearLinkDiagnostic(
+      'phone server start enabled=${status.value.enabled} '
+      'state=${status.value.state.name} error=${status.value.error}',
+    );
     if (!status.value.enabled) return;
     await _push(force: true);
   }
@@ -111,6 +142,10 @@ class WearLinkServer {
     final next = WearLinkStatus.fromMap(result);
     status.value = next;
     fit.setWearLink(next.enabled);
+    wearLinkDiagnostic(
+      'phone server enabled=${next.enabled} '
+      'state=${next.state.name} error=${next.error}',
+    );
     if (next.enabled) await _push(force: true);
   }
 
@@ -162,7 +197,10 @@ class WearLinkServer {
   /// overwrite the state that the command produced. A caller that arrives while
   /// a push is in flight waits for it and runs one more push afterwards.
   Future<int> _push({bool force = false}) {
-    if (!_supported || !fit.wearLink) return Future.value(_rev);
+    if (!_supported || !fit.wearLink) {
+      wearLinkDiagnostic('phone snapshot push skipped supported=$_supported enabled=${fit.wearLink}');
+      return Future.value(_rev);
+    }
     final active = _pushTask;
     if (active != null) {
       return active.then((_) => _push(force: force));
@@ -186,10 +224,15 @@ class WearLinkServer {
       fingerprint: fingerprint,
     );
     _lastSnapshot = snapshot;
+    wearLinkDiagnostic(
+      'phone snapshot prepared ${wearSnapshotSummary(snapshot.json)} '
+      'route=${fit.route} connected=${status.value.connected} force=$force',
+    );
     try {
       await _channel.invokeMethod<void>('update', {'json': snapshot.encode()});
+      wearLinkDiagnostic('phone snapshot handed to native rev=$_rev');
     } catch (error) {
-      debugPrint('Wear link update failed: $error');
+      wearLinkDiagnostic('phone snapshot channel failed type=${error.runtimeType}');
     }
     return _rev;
   }

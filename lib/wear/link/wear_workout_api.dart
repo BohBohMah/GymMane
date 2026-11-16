@@ -8,6 +8,7 @@ abstract class WearWorkoutApi {
   bool get complete;
   int get elapsedSeconds;
   int get restTotal;
+  String get effortMode;
   String get workoutName;
   bool get hasData;
 

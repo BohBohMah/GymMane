@@ -1,6 +1,6 @@
 # GymMane local phone ↔ watch link — BLE feasibility
 
-Status: **code-validated only; not verified on real hardware.**
+Status: **partial transport validation; end-to-end workout sync not verified.**
 This document separates what the build and the unit tests prove from what still
 needs a physical Android phone and a physical Wear OS watch.
 
@@ -17,9 +17,11 @@ APIs:
 - both directions require an OS-bonded, encrypted, MITM-protected link, and the
   app adds its own PIN/PSK handshake and HMAC-protected session on top.
 
-This is a supported Android pattern. However, **no physical phone/watch pair was
-available in this environment**, and an emulator cannot validate real BLE
-peripheral communication. Every hardware claim below is therefore unverified.
+This is a supported Android pattern. A first physical test on the HONOR Magic8
+Lite and Galaxy Watch4 Classic confirmed GATT connection, service discovery and
+MTU 517 after reconnect. The watch still did not display the active workout,
+so application-level snapshot delivery remains unverified and is currently
+failing on that pair. An emulator cannot validate this BLE path.
 
 ## 2. What code validation proves
 
@@ -34,10 +36,12 @@ peripheral communication. Every hardware claim below is therefore unverified.
 | The app compiles with the native GATT server/client/bridge | `:app:compileDebugKotlin` |
 | The release APK has no `INTERNET`, no `BLUETOOTH_SCAN`, no location permission | merged release manifest + `aapt dump permissions` |
 | The companion entry point compiles | `flutter build bundle -t lib/main_wear_companion.dart` |
+| One HONOR/Watch4 BLE reconnect reaches GATT, discovers the service and negotiates MTU 517 | Physical ADB Bluetooth logs, 2026-11-15 |
 
-These results validate **code and protocol behaviour only**. They do not prove
-that a given phone advertises correctly, that a given watch connects, that the
-MTU is negotiated, that indications are delivered, or that reconnection works.
+The physical result proves GATT connection, service discovery and MTU negotiation
+on this pair only. It does not prove that secure application state indications
+are delivered, that workout snapshots are applied, or that reconnect remains
+reliable. The observed snapshot test failed.
 
 ## 3. Android API feasibility
 
@@ -100,16 +104,19 @@ This procedure is the missing validation. Record the result for every step.
 ### 6.1 Prerequisites
 
 - One Android phone, API 31 or newer, with BLE.
-- One Wear OS watch, API 30/ Wear OS 3 or newer, with BLE.
+- One Wear OS watch, Android API 31 or newer, with BLE.
 - Both devices paired (bonded) in system Bluetooth settings.
-- Phone build: `flutter build apk --release`.
-- Watch build: the same APK, launched in watch mode, or a development build with
-  `flutter run -t lib/main_wear_companion.dart -d <wear-device>`.
+- Use the isolated test APKs and the Windows/ADB walkthrough in
+  [`REAL_DEVICE_TEST.md`](REAL_DEVICE_TEST.md). Do not use the production
+  `app-release.apk` for this test.
+- Phone test ID: `com.gymmane.test.phone`; watch test ID:
+  `com.gymmane.test.wear`. They install alongside production
+  `com.gymmane.app`.
 - Bluetooth on, Wi-Fi and mobile data can be off for the privacy test.
 
 ### 6.2 Pairing
 
-1. Install and open GymMane on the phone.
+1. Install and open GymMane Test Phone on the phone.
 2. Settings → **Smartwatch link** → enable.
 3. Tap **PAIR A WATCH**; a six-digit code and a two-minute countdown appear.
 4. On the watch: Settings → **Phone link** → **CONNECT PHONE**; grant the
@@ -164,9 +171,11 @@ Record: pairing time, any system pairing dialog, any error code shown.
 
 ### 6.6 Privacy checks
 
-1. `aapt dump permissions build/app/outputs/flutter-apk/app-release.apk` must show
-   no `android.permission.INTERNET`, no `BLUETOOTH_SCAN`, no location permission.
-2. `adb shell dumpsys package com.gymmane.app` must not list `INTERNET`.
+1. Inspect both test APKs (or installed packages
+   `com.gymmane.test.phone` and `com.gymmane.test.wear`). Neither may have
+   `android.permission.INTERNET`, `BLUETOOTH_SCAN` or location permissions.
+2. The phone APK requires `BLUETOOTH_ADVERTISE` and `BLUETOOTH_CONNECT`; the
+   watch APK requires only `BLUETOOTH_CONNECT` (plus `VIBRATE`).
 3. Turn off Wi-Fi and mobile data (or use airplane mode with Bluetooth on).
    Expected: pairing, snapshots and commands still work.
 4. Inspect logcat for HTTP/WebSocket/Data Layer calls.
@@ -178,6 +187,7 @@ Run at least:
 
 | Phone | Watch | Result |
 | --- | --- | --- |
+| HONOR Magic8 Lite | Samsung Galaxy Watch4 Classic 46 mm / Wear OS 6.0 | GATT reconnect + service discovery + MTU 517 observed; workout snapshot not displayed; investigating |
 | Pixel (stock Android 12+) | Pixel Watch / Galaxy Watch | pending |
 | Samsung (One UI) | Galaxy Watch | pending |
 | Xiaomi/Redmi | any Wear OS watch | pending |
@@ -195,7 +205,10 @@ least two real pairs:
   permission;
 - no crash or ANR in logcat during a 15-minute session.
 
-Until then, treat the implementation as **code-complete and hardware-unverified**.
+The installable test APKs have been built and statically inspected. A first
+physical transport smoke test is recorded above, but end-to-end workout sync
+failed. Follow `REAL_DEVICE_TEST.md`; do not call the feature end-to-end
+hardware-verified until the full criteria above pass.
 
 ## 8. How to run the automated evidence
 

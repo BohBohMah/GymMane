@@ -27,7 +27,7 @@ class WearLinkScreen extends StatefulWidget {
 
 class _WearLinkScreenState extends State<WearLinkScreen> {
   final WearLinkClient _client = WearLinkClient.instance;
-  final TextEditingController _pin = TextEditingController();
+  String _pin = '';
 
   Timer? _ticker;
   Timer? _flashTimer;
@@ -65,7 +65,6 @@ class _WearLinkScreenState extends State<WearLinkScreen> {
     _client.pinPrompt.removeListener(_onValue);
     _ticker?.cancel();
     _flashTimer?.cancel();
-    _pin.dispose();
     super.dispose();
   }
 
@@ -84,11 +83,7 @@ class _WearLinkScreenState extends State<WearLinkScreen> {
     });
   }
 
-  Future<void> _run(
-    String key,
-    Future<WearAck> Function() action, {
-    bool confirm = true,
-  }) async {
+  Future<void> _run(String key, Future<WearAck> Function() action, {bool confirm = true}) async {
     if (_acting != null) return;
     HapticFeedback.selectionClick();
     setState(() => _acting = key);
@@ -105,12 +100,12 @@ class _WearLinkScreenState extends State<WearLinkScreen> {
   }
 
   String _ackMessage(WearAck ack) => switch (ack.code) {
-        'conflict' => t.wearLinkNotSaved,
-        'offline' || 'timeout' => t.wearLinkOffline,
-        'no_session' => t.wearLinkNoWorkout,
-        'no_pending' => t.wearLinkNoWorkout,
-        _ => '${t.wearLinkNotSaved} (${ack.code})',
-      };
+    'conflict' => t.wearLinkNotSaved,
+    'offline' || 'timeout' => t.wearLinkOffline,
+    'no_session' => t.wearLinkNoWorkout,
+    'no_pending' => t.wearLinkNoWorkout,
+    _ => '${t.wearLinkNotSaved} (${ack.code})',
+  };
 
   Future<void> _loadDevices() async {
     if (_loadingDevices) return;
@@ -137,7 +132,7 @@ class _WearLinkScreenState extends State<WearLinkScreen> {
   Future<void> _submitPin() async {
     if (_acting != null) return;
     setState(() => _acting = 'pin');
-    final ok = await _client.submitPin(_pin.text.trim());
+    final ok = await _client.submitPin(_pin);
     if (!mounted) return;
     setState(() => _acting = null);
     if (!ok) _showFlash(t.wearLinkPinWrong, false);
@@ -214,146 +209,187 @@ class _WearLinkScreenState extends State<WearLinkScreen> {
       '' => '',
       final code => '${t.wearLinkOffline} ($code)',
     };
-    return WearPage(children: [
-      Center(child: _statusDot(gc, status)),
-      const SizedBox(height: 8),
-      Text(t.wearLinkBody,
+    return WearPage(
+      children: [
+        Center(child: _statusDot(gc, status)),
+        const SizedBox(height: 8),
+        Text(
+          t.wearLinkBody,
           textAlign: TextAlign.center,
           maxLines: 3,
-          style: AppTheme.f(12, weight: FontWeight.w500, color: gc.textSecondary, height: 1.3)),
-      if (error.isNotEmpty) ...[
-        const SizedBox(height: 6),
-        Text(error,
+          style: AppTheme.f(12, weight: FontWeight.w500, color: gc.textSecondary, height: 1.3),
+        ),
+        if (error.isNotEmpty) ...[
+          const SizedBox(height: 6),
+          Text(
+            error,
             textAlign: TextAlign.center,
-            style: AppTheme.f(11.5, weight: FontWeight.w600, color: gc.warn)),
-      ],
-      const SizedBox(height: 10),
-      if (devices == null)
-        WearButton(
-          label: _loadingDevices ? t.wearLinkConnecting : t.wearLinkConnect,
-          icon: PhosphorIconsRegular.linkSimple,
-          filled: true,
-          onTap: _loadingDevices ? null : _loadDevices,
-        )
-      else ...[
-        Text(t.wearLinkChoosePhone,
+            style: AppTheme.f(11.5, weight: FontWeight.w600, color: gc.warn),
+          ),
+        ],
+        const SizedBox(height: 10),
+        if (devices == null)
+          WearButton(
+            label: _loadingDevices ? t.wearLinkConnecting : t.wearLinkConnect,
+            icon: PhosphorIconsRegular.linkSimple,
+            filled: true,
+            onTap: _loadingDevices ? null : _loadDevices,
+          )
+        else ...[
+          Text(
+            t.wearLinkChoosePhone,
             textAlign: TextAlign.center,
-            style: AppTheme.f(11, weight: FontWeight.w500, color: gc.textTertiary)),
-        const SizedBox(height: 6),
-        if (devices.isEmpty)
-          Text(t.wearLinkNoDevices,
+            style: AppTheme.f(11, weight: FontWeight.w500, color: gc.textTertiary),
+          ),
+          const SizedBox(height: 6),
+          if (devices.isEmpty)
+            Text(
+              t.wearLinkNoDevices,
               textAlign: TextAlign.center,
-              style: AppTheme.f(12, weight: FontWeight.w600, color: gc.warn))
-        else
-          for (final device in devices) ...[
-            WearButton(
-              label: device.name,
-              icon: PhosphorIconsFill.deviceMobile,
-              filled: _acting == 'connect',
-              onTap: _acting == null ? () => _connect(device) : null,
-            ),
-            const SizedBox(height: 6),
-          ],
-        const SizedBox(height: 2),
-        WearButton(
-          label: t.wearLinkRefresh,
-          icon: PhosphorIconsRegular.arrowsClockwise,
-          onTap: _loadDevices,
-        ),
-      ],
-      if (status.enabled) ...[
+              style: AppTheme.f(12, weight: FontWeight.w600, color: gc.warn),
+            )
+          else
+            for (final device in devices) ...[
+              WearButton(
+                label: device.name,
+                icon: PhosphorIconsFill.deviceMobile,
+                filled: _acting == 'connect',
+                onTap: _acting == null ? () => _connect(device) : null,
+              ),
+              const SizedBox(height: 6),
+            ],
+          const SizedBox(height: 2),
+          WearButton(
+            label: t.wearLinkRefresh,
+            icon: PhosphorIconsRegular.arrowsClockwise,
+            onTap: _loadDevices,
+          ),
+        ],
+        if (status.enabled) ...[
+          const SizedBox(height: 8),
+          WearButton(
+            label: t.wearLinkDisconnect,
+            icon: PhosphorIconsRegular.plugs,
+            onTap: () => _client.disconnect(),
+          ),
+        ],
+        if (status.address.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          WearButton(
+            label: t.wearLinkForget,
+            icon: PhosphorIconsRegular.linkBreak,
+            onTap: () async {
+              await _client.forget();
+              if (mounted) setState(() {});
+            },
+          ),
+        ],
         const SizedBox(height: 8),
-        WearButton(
-          label: t.wearLinkDisconnect,
-          icon: PhosphorIconsRegular.plugs,
-          onTap: () => _client.disconnect(),
-        ),
+        _backButton(),
       ],
-      if (status.address.isNotEmpty) ...[
-        const SizedBox(height: 8),
-        WearButton(
-          label: t.wearLinkForget,
-          icon: PhosphorIconsRegular.linkBreak,
-          onTap: () async {
-            await _client.forget();
-            if (mounted) setState(() {});
-          },
-        ),
-      ],
-      const SizedBox(height: 8),
-      _backButton(),
-    ]);
+    );
   }
 
   Widget _pinPage(GymColors gc, WearLinkStatus status) {
     final phone = _client.pinPrompt.value ?? '';
-    return WearPage(children: [
-      Text(t.wearLinkLinkedTo(phone),
+    return WearPage(
+      children: [
+        Text(
+          t.wearLinkLinkedTo(phone),
           textAlign: TextAlign.center,
-          style: AppTheme.f(13, weight: FontWeight.w700, color: gc.text)),
-      const SizedBox(height: 6),
-      Text(t.wearLinkPinTitle,
-          textAlign: TextAlign.center,
-          style: AppTheme.f(11.5, weight: FontWeight.w500, color: gc.textSecondary)),
-      const SizedBox(height: 8),
-      TextField(
-        controller: _pin,
-        keyboardType: TextInputType.number,
-        inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(6)],
-        textAlign: TextAlign.center,
-        style: AppTheme.f(22, weight: FontWeight.w800, color: gc.text, letterSpacing: 4),
-        decoration: InputDecoration(
-          hintText: t.wearLinkPinHint,
-          hintStyle: AppTheme.f(12, weight: FontWeight.w500, color: gc.textTertiary),
-          filled: true,
-          fillColor: gc.bgRaised,
-          border: OutlineInputBorder(borderRadius: BorderRadius.circular(18), borderSide: BorderSide.none),
-          isDense: true,
-          contentPadding: const EdgeInsets.symmetric(vertical: 12, horizontal: 10),
+          style: AppTheme.f(13, weight: FontWeight.w700, color: gc.text),
         ),
-        onSubmitted: (_) => _submitPin(),
-      ),
-      const SizedBox(height: 10),
-      WearButton(
-        label: t.wearLinkConfirm,
-        icon: PhosphorIconsBold.check,
-        filled: true,
-        onTap: _acting == null ? _submitPin : null,
-      ),
-      const SizedBox(height: 6),
-      WearButton(
-        label: t.cancel,
-        icon: PhosphorIconsRegular.x,
-        onTap: _acting == null
-            ? () async {
-                await _client.disconnect();
-                if (mounted) setState(() {});
-              }
-            : null,
-      ),
-      _flashLine,
-    ]);
+        const SizedBox(height: 6),
+        Text(
+          t.wearLinkPinTitle,
+          textAlign: TextAlign.center,
+          style: AppTheme.f(11.5, weight: FontWeight.w500, color: gc.textSecondary),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          _pin.isEmpty ? t.wearLinkPinHint : '●' * _pin.length,
+          textAlign: TextAlign.center,
+          style: AppTheme.f(20, weight: FontWeight.w800, color: gc.text, letterSpacing: 4),
+        ),
+        for (final row in const [
+          ['1', '2', '3'],
+          ['4', '5', '6'],
+          ['7', '8', '9'],
+          ['', '0', '⌫'],
+        ])
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              for (final key in row)
+                SizedBox(
+                  width: 48,
+                  height: 42,
+                  child: key.isEmpty
+                      ? const SizedBox.shrink()
+                      : TextButton(
+                          onPressed: _acting != null
+                              ? null
+                              : () => setState(() {
+                                  if (key == '⌫') {
+                                    if (_pin.isNotEmpty) _pin = _pin.substring(0, _pin.length - 1);
+                                  } else if (_pin.length < 6) {
+                                    _pin += key;
+                                  }
+                                }),
+                          child: Text(
+                            key,
+                            style: AppTheme.f(17, weight: FontWeight.w700, color: gc.text),
+                          ),
+                        ),
+                ),
+            ],
+          ),
+        const SizedBox(height: 10),
+        WearButton(
+          label: t.wearLinkConfirm,
+          icon: PhosphorIconsBold.check,
+          filled: true,
+          onTap: _acting == null && _pin.length == 6 ? _submitPin : null,
+        ),
+        const SizedBox(height: 6),
+        WearButton(
+          label: t.cancel,
+          icon: PhosphorIconsRegular.x,
+          onTap: _acting == null
+              ? () async {
+                  await _client.disconnect();
+                  if (mounted) setState(() {});
+                }
+              : null,
+        ),
+        _flashLine,
+      ],
+    );
   }
 
   Widget _workoutPage(GymColors gc, WearLinkStatus status, RemoteWorkout? workout) {
     if (workout == null || !workout.hasWorkout) {
-      return WearPage(children: [
-        Center(child: _statusDot(gc, status)),
-        const SizedBox(height: 10),
-        Text(t.wearLinkNoWorkout,
+      return WearPage(
+        children: [
+          Center(child: _statusDot(gc, status)),
+          const SizedBox(height: 10),
+          Text(
+            workout == null ? t.wearLinkConnecting : t.wearLinkNoWorkout,
             textAlign: TextAlign.center,
-            style: AppTheme.f(13, weight: FontWeight.w600, color: gc.textSecondary)),
-        const SizedBox(height: 10),
-        WearButton(
-          label: t.wearLinkRefresh,
-          icon: PhosphorIconsRegular.arrowsClockwise,
-          filled: true,
-          onTap: () => _client.requestState(),
-        ),
-        _flashLine,
-        const SizedBox(height: 8),
-        _backButton(),
-      ]);
+            style: AppTheme.f(13, weight: FontWeight.w600, color: gc.textSecondary),
+          ),
+          const SizedBox(height: 10),
+          WearButton(
+            label: t.wearLinkRefresh,
+            icon: PhosphorIconsRegular.arrowsClockwise,
+            filled: true,
+            onTap: () => _client.requestState(),
+          ),
+          _flashLine,
+          const SizedBox(height: 8),
+          _backButton(),
+        ],
+      );
     }
     final exercises = workout.exercises;
     final exIndex = workout.currentIndex.clamp(0, exercises.isEmpty ? 0 : exercises.length - 1);
@@ -365,154 +401,172 @@ class _WearLinkScreenState extends State<WearLinkScreen> {
     final resting = rest != null && (rest.frozenSeconds != null || restLeft > Duration.zero);
     final previous = exercise == null || pending <= 0 ? null : _previousSet(exercise, pending);
 
-    return WearPage(children: [
-      Center(child: _statusDot(gc, status)),
-      const SizedBox(height: 6),
-      Text(
-        workout.name,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        textAlign: TextAlign.center,
-        style: AppTheme.f(12, weight: FontWeight.w700, color: gc.textSecondary),
-      ),
-      const SizedBox(height: 2),
-      Center(
-        child: Text(
-          '${exIndex + 1}/${exercises.length}  ·  ${t.wearLinkSets(workout.doneSets, workout.totalSets)}',
-          style: AppTheme.f(11, weight: FontWeight.w600, color: gc.textTertiary),
-        ),
-      ),
-      const SizedBox(height: 6),
-      if (resting) ...[
-        _restCard(gc, rest, restLeft),
-        const SizedBox(height: 8),
-      ],
-      if (exercise != null)
+    return WearPage(
+      children: [
+        Center(child: _statusDot(gc, status)),
+        const SizedBox(height: 6),
         Text(
-          t.catalogName(exercise.id, exercise.name),
-          maxLines: 2,
-          textAlign: TextAlign.center,
+          workout.name,
+          maxLines: 1,
           overflow: TextOverflow.ellipsis,
-          style: AppTheme.f(15, weight: FontWeight.w800, color: gc.text, height: 1.15),
+          textAlign: TextAlign.center,
+          style: AppTheme.f(12, weight: FontWeight.w700, color: gc.textSecondary),
         ),
-      if (exercise?.linkedNext == true) ...[
         const SizedBox(height: 2),
-        Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-          Icon(PhosphorIconsBold.link, size: 10, color: gc.brass),
-          const SizedBox(width: 4),
-          Text(t.superset, style: AppTheme.f(10, weight: FontWeight.w700, color: gc.brass)),
-        ]),
-      ],
-      const SizedBox(height: 8),
-      if (workout.finished)
-        _summaryCard(gc, workout)
-      else if (set != null && exercise != null) ...[
-        _setCard(gc, exercise.id, exercise.sets, pending, set),
+        Center(
+          child: Text(
+            '${exIndex + 1}/${exercises.length}  ·  ${t.wearLinkSets(workout.doneSets, workout.totalSets)}',
+            style: AppTheme.f(11, weight: FontWeight.w600, color: gc.textTertiary),
+          ),
+        ),
         const SizedBox(height: 6),
-        if (previous != null)
+        if (resting) ...[_restCard(gc, rest, restLeft), const SizedBox(height: 8)],
+        if (exercise != null)
           Text(
-            '${t.wearLinkPrev}: ${_setValue(previous, exercise.id)}',
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
+            t.catalogName(exercise.id, exercise.name),
+            maxLines: 2,
             textAlign: TextAlign.center,
-            style: AppTheme.f(10.5, weight: FontWeight.w600, color: gc.textTertiary),
+            overflow: TextOverflow.ellipsis,
+            style: AppTheme.f(15, weight: FontWeight.w800, color: gc.text, height: 1.15),
           ),
-        const SizedBox(height: 6),
-        ..._editors(gc, exIndex, pending, set, exercise.id),
-        const SizedBox(height: 6),
-        _rpeRow(gc, exIndex, pending, set),
+        if (exercise?.linkedNext == true) ...[
+          const SizedBox(height: 2),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(PhosphorIconsBold.link, size: 10, color: gc.brass),
+              const SizedBox(width: 4),
+              Text(
+                t.superset,
+                style: AppTheme.f(10, weight: FontWeight.w700, color: gc.brass),
+              ),
+            ],
+          ),
+        ],
         const SizedBox(height: 8),
-        WearButton(
-          label: _acting == 'set' ? t.wearLinkWaiting : t.wearLinkComplete,
-          icon: PhosphorIconsBold.check,
-          filled: true,
-          onTap: _acting == null ? () => _run('set', () => _client.completeSet(exIndex, pending)) : null,
-        ),
-      ] else
-        WearButton(
-          label: t.wearLinkRefresh,
-          icon: PhosphorIconsRegular.arrowsClockwise,
-          onTap: _acting == null ? () => _client.requestState() : null,
-        ),
-      if (!workout.finished) ...[
-        const SizedBox(height: 8),
-        Row(children: [
-          Expanded(
-            child: WearIconButton(
-              icon: PhosphorIconsBold.caretLeft,
-              label: t.back,
-              onTap: _acting == null && exIndex > 0
-                  ? () => _run('nav', () => _client.goToExercise(exIndex - 1))
-                  : null,
+        if (workout.finished)
+          _summaryCard(gc, workout)
+        else if (set != null && exercise != null) ...[
+          _setCard(gc, exercise.id, exercise.sets, pending, set),
+          const SizedBox(height: 6),
+          if (previous != null)
+            Text(
+              '${t.wearLinkPrev}: ${_setValue(previous, exercise.id)}',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: AppTheme.f(10.5, weight: FontWeight.w600, color: gc.textTertiary),
             ),
+          const SizedBox(height: 6),
+          ..._editors(gc, exIndex, pending, set, exercise.id),
+          const SizedBox(height: 6),
+          if (workout.effortMode.isNotEmpty) _rpeRow(gc, exIndex, pending, set, workout.effortMode),
+          const SizedBox(height: 8),
+          WearButton(
+            label: _acting == 'set' ? t.wearLinkWaiting : t.wearLinkComplete,
+            icon: PhosphorIconsBold.check,
+            filled: true,
+            onTap: _acting == null ? () => _run('set', () => _client.completeSet(exIndex, pending)) : null,
           ),
-          const SizedBox(width: 6),
-          Expanded(
-            child: WearIconButton(
-              icon: PhosphorIconsBold.caretRight,
-              label: t.nextExercise,
-              onTap: _acting == null && exIndex < exercises.length - 1
-                  ? () => _run('nav', () => _client.goToExercise(exIndex + 1))
-                  : null,
-            ),
+        ] else
+          WearButton(
+            label: t.wearLinkRefresh,
+            icon: PhosphorIconsRegular.arrowsClockwise,
+            onTap: _acting == null ? () => _client.requestState() : null,
           ),
-        ]),
-        const SizedBox(height: 6),
-        WearButton(
-          label: workout.status == RemoteStatus.paused ? t.resumeWorkout : t.pauseWorkout,
-          icon: workout.status == RemoteStatus.paused ? PhosphorIconsFill.play : PhosphorIconsFill.pause,
-          onTap: _acting == null
-              ? () => _run(
+        if (!workout.finished) ...[
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: WearIconButton(
+                  icon: PhosphorIconsBold.caretLeft,
+                  label: t.back,
+                  onTap: _acting == null && exIndex > 0
+                      ? () => _run('nav', () => _client.goToExercise(exIndex - 1))
+                      : null,
+                ),
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: WearIconButton(
+                  icon: PhosphorIconsBold.caretRight,
+                  label: t.nextExercise,
+                  onTap: _acting == null && exIndex < exercises.length - 1
+                      ? () => _run('nav', () => _client.goToExercise(exIndex + 1))
+                      : null,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          WearButton(
+            label: workout.status == RemoteStatus.paused ? t.resumeWorkout : t.pauseWorkout,
+            icon: workout.status == RemoteStatus.paused ? PhosphorIconsFill.play : PhosphorIconsFill.pause,
+            onTap: _acting == null
+                ? () => _run(
                     'pause',
-                    () => workout.status == RemoteStatus.paused
-                        ? _client.resumeWorkout()
-                        : _client.pause(),
+                    () => workout.status == RemoteStatus.paused ? _client.resumeWorkout() : _client.pause(),
                   )
-              : null,
+                : null,
+          ),
+        ],
+        _flashLine,
+        const SizedBox(height: 8),
+        WearButton(
+          label: t.wearLinkDisconnect,
+          icon: PhosphorIconsRegular.plugs,
+          onTap: () => _client.disconnect(),
         ),
+        const SizedBox(height: 6),
+        _backButton(),
       ],
-      _flashLine,
-      const SizedBox(height: 8),
-      WearButton(
-        label: t.wearLinkDisconnect,
-        icon: PhosphorIconsRegular.plugs,
-        onTap: () => _client.disconnect(),
-      ),
-      const SizedBox(height: 6),
-      _backButton(),
-    ]);
+    );
   }
 
   Widget _backButton() => WearButton(
-        label: t.back,
-        icon: PhosphorIconsBold.caretLeft,
-        onTap: () => fit.popRoute(fallback: 'home'),
-      );
+    label: t.back,
+    icon: PhosphorIconsBold.caretLeft,
+    onTap: () => fit.popRoute(fallback: 'home'),
+  );
 
   Widget _restCard(GymColors gc, RemoteRest rest, Duration left) {
     return Container(
       padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
       decoration: BoxDecoration(color: gc.bgRaised, borderRadius: BorderRadius.circular(22)),
-      child: Column(children: [
-        Text(
-          rest.switchSides ? t.switchSides : t.rest,
-          style: AppTheme.f(10.5, weight: FontWeight.w700, color: gc.textSecondary),
-        ),
-        Text(
-          clockLabel(left.inSeconds),
-          style: AppTheme.f(28, weight: FontWeight.w800, color: gc.text, height: 1.1),
-        ),
-        const SizedBox(height: 6),
-        Row(children: [
-          Expanded(child: _tiny(gc, '-15', () => _run('rest', () => _client.nudgeRest(-15), confirm: false))),
-          const SizedBox(width: 4),
-          Expanded(
-            child: _tiny(gc, t.skip, () => _run('rest', () => _client.skipRest(), confirm: false), strong: true),
+      child: Column(
+        children: [
+          Text(
+            rest.switchSides ? t.switchSides : t.rest,
+            style: AppTheme.f(10.5, weight: FontWeight.w700, color: gc.textSecondary),
           ),
-          const SizedBox(width: 4),
-          Expanded(child: _tiny(gc, '+15', () => _run('rest', () => _client.nudgeRest(15), confirm: false))),
-        ]),
-      ]),
+          Text(
+            clockLabel(left.inSeconds),
+            style: AppTheme.f(28, weight: FontWeight.w800, color: gc.text, height: 1.1),
+          ),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              Expanded(
+                child: _tiny(gc, '-15', () => _run('rest', () => _client.nudgeRest(-15), confirm: false)),
+              ),
+              const SizedBox(width: 4),
+              Expanded(
+                child: _tiny(
+                  gc,
+                  t.skip,
+                  () => _run('rest', () => _client.skipRest(), confirm: false),
+                  strong: true,
+                ),
+              ),
+              const SizedBox(width: 4),
+              Expanded(
+                child: _tiny(gc, '+15', () => _run('rest', () => _client.nudgeRest(15), confirm: false)),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 
@@ -521,20 +575,24 @@ class _WearLinkScreenState extends State<WearLinkScreen> {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(color: gc.bgRaised, borderRadius: BorderRadius.circular(22)),
-      child: Column(children: [
-        Icon(PhosphorIconsFill.trophy, size: 22, color: gc.ember),
-        const SizedBox(height: 4),
-        Text(t.wearLinkSessionDone,
-            textAlign: TextAlign.center,
-            style: AppTheme.f(13, weight: FontWeight.w700, color: gc.text)),
-        if (summary != null) ...[
+      child: Column(
+        children: [
+          Icon(PhosphorIconsFill.trophy, size: 22, color: gc.ember),
           const SizedBox(height: 4),
           Text(
-            '${summary.sets} · ${fit.weightValue(summary.volumeKg.toDouble())} ${fit.units}',
-            style: AppTheme.f(11.5, weight: FontWeight.w600, color: gc.textSecondary),
+            t.wearLinkSessionDone,
+            textAlign: TextAlign.center,
+            style: AppTheme.f(13, weight: FontWeight.w700, color: gc.text),
           ),
+          if (summary != null) ...[
+            const SizedBox(height: 4),
+            Text(
+              '${summary.sets} · ${fit.weightValue(summary.volumeKg.toDouble())} ${fit.units}',
+              style: AppTheme.f(11.5, weight: FontWeight.w600, color: gc.textSecondary),
+            ),
+          ],
         ],
-      ]),
+      ),
     );
   }
 
@@ -550,22 +608,27 @@ class _WearLinkScreenState extends State<WearLinkScreen> {
     return Container(
       padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
       decoration: BoxDecoration(color: gc.bgRaised, borderRadius: BorderRadius.circular(22)),
-      child: Column(children: [
-        Text(
-          '${t.wearLinkSet} ${pending + 1}/${sets.length}${kind.isEmpty ? '' : ' · $kind'}',
-          style: AppTheme.f(10.5, weight: FontWeight.w700, color: gc.textSecondary),
-        ),
-        const SizedBox(height: 2),
-        Text(
-          _setValue(set, exerciseId),
-          textAlign: TextAlign.center,
-          style: AppTheme.f(20, weight: FontWeight.w800, color: gc.text, height: 1.1),
-        ),
-        if (set.half) ...[
+      child: Column(
+        children: [
+          Text(
+            '${t.wearLinkSet} ${pending + 1}/${sets.length}${kind.isEmpty ? '' : ' · $kind'}',
+            style: AppTheme.f(10.5, weight: FontWeight.w700, color: gc.textSecondary),
+          ),
           const SizedBox(height: 2),
-          Text('1/2', style: AppTheme.f(10, weight: FontWeight.w700, color: gc.warn)),
+          Text(
+            _setValue(set, exerciseId),
+            textAlign: TextAlign.center,
+            style: AppTheme.f(20, weight: FontWeight.w800, color: gc.text, height: 1.1),
+          ),
+          if (set.half) ...[
+            const SizedBox(height: 2),
+            Text(
+              '1/2',
+              style: AppTheme.f(10, weight: FontWeight.w700, color: gc.warn),
+            ),
+          ],
         ],
-      ]),
+      ),
     );
   }
 
@@ -592,24 +655,22 @@ class _WearLinkScreenState extends State<WearLinkScreen> {
           gc,
           fit.distanceUnitFor(exerciseId).toUpperCase(),
           fit.distanceValueFor(exerciseId, set.km!),
-          () => _run(
-            'km',
-            () => _client.updateSet(exIndex, pending, km: (set.km! - 0.1).clamp(0.0, 1000.0)),
-          ),
-          () => _run(
-            'km',
-            () => _client.updateSet(exIndex, pending, km: (set.km! + 0.1).clamp(0.0, 1000.0)),
-          ),
+          () => _run('km', () => _client.updateSet(exIndex, pending, km: (set.km! - 0.1).clamp(0.0, 1000.0))),
+          () => _run('km', () => _client.updateSet(exIndex, pending, km: (set.km! + 0.1).clamp(0.0, 1000.0))),
         ),
         const SizedBox(height: 6),
         _stepper(
           gc,
           t.timeCol,
           clockLabel(set.sec ?? 0),
-          () => _run('sec',
-              () => _client.updateSet(exIndex, pending, sec: ((set.sec ?? 0) - 60).clamp(0, 86400))),
-          () => _run('sec',
-              () => _client.updateSet(exIndex, pending, sec: ((set.sec ?? 0) + 60).clamp(0, 86400))),
+          () => _run(
+            'sec',
+            () => _client.updateSet(exIndex, pending, sec: ((set.sec ?? 0) - 60).clamp(0, 86400)),
+          ),
+          () => _run(
+            'sec',
+            () => _client.updateSet(exIndex, pending, sec: ((set.sec ?? 0) + 60).clamp(0, 86400)),
+          ),
         ),
       ];
     }
@@ -619,10 +680,8 @@ class _WearLinkScreenState extends State<WearLinkScreen> {
           gc,
           t.timeCol,
           clockLabel(set.sec!),
-          () => _run('sec',
-              () => _client.updateSet(exIndex, pending, sec: (set.sec! - 15).clamp(0, 86400))),
-          () => _run('sec',
-              () => _client.updateSet(exIndex, pending, sec: (set.sec! + 15).clamp(0, 86400))),
+          () => _run('sec', () => _client.updateSet(exIndex, pending, sec: (set.sec! - 15).clamp(0, 86400))),
+          () => _run('sec', () => _client.updateSet(exIndex, pending, sec: (set.sec! + 15).clamp(0, 86400))),
         ),
       ];
     }
@@ -642,80 +701,92 @@ class _WearLinkScreenState extends State<WearLinkScreen> {
         fit.weightValue(set.weight),
         () => _run(
           'weight',
-          () => _client.updateSet(
-            exIndex,
-            pending,
-            weight: _roundKg((set.weight - step).clamp(0.0, 1000.0)),
-          ),
+          () => _client.updateSet(exIndex, pending, weight: _roundKg((set.weight - step).clamp(0.0, 1000.0))),
         ),
         () => _run(
           'weight',
-          () => _client.updateSet(
-            exIndex,
-            pending,
-            weight: _roundKg((set.weight + step).clamp(0.0, 1000.0)),
-          ),
+          () => _client.updateSet(exIndex, pending, weight: _roundKg((set.weight + step).clamp(0.0, 1000.0))),
         ),
       ),
     ];
   }
 
-  Widget _rpeRow(GymColors gc, int exIndex, int pending, RemoteSet set) {
-    return Column(children: [
-      Text('RPE', style: AppTheme.f(10, weight: FontWeight.w700, color: gc.textTertiary)),
-      const SizedBox(height: 4),
-      Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          for (final value in const [6, 7, 8, 9, 10]) ...[
-            if (value != 6) const SizedBox(width: 3),
-            Expanded(
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: _acting == null
-                    ? () => _run(
+  Widget _rpeRow(GymColors gc, int exIndex, int pending, RemoteSet set, String mode) {
+    final rir = mode == 'rir';
+    final values = rir ? const [0, 1, 2, 3, 4] : const [6, 7, 8, 9, 10];
+    return Column(
+      children: [
+        Text(
+          rir ? 'RIR' : 'RPE',
+          style: AppTheme.f(10, weight: FontWeight.w700, color: gc.textTertiary),
+        ),
+        const SizedBox(height: 4),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            for (final value in values) ...[
+              if (value != values.first) const SizedBox(width: 3),
+              Expanded(
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: _acting == null
+                      ? () => _run(
                           'rpe',
                           () => _client.updateSet(
                             exIndex,
                             pending,
-                            rpe: value.toDouble(),
-                            clearRpe: set.rpe == value.toDouble(),
+                            rpe: (rir ? 10 - value : value).toDouble(),
+                            clearRpe: set.rpe == (rir ? 10 - value : value).toDouble(),
                           ),
                           confirm: false,
                         )
-                    : null,
-                child: Container(
-                  height: 32,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    color: set.rpe == value.toDouble() ? gc.text : gc.bgRaised,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Text(
-                    '$value',
-                    style: AppTheme.f(12, weight: FontWeight.w700,
-                        color: set.rpe == value.toDouble() ? gc.bg : gc.textSecondary),
+                      : null,
+                  child: Container(
+                    height: 32,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: set.rpe == (rir ? 10 - value : value).toDouble() ? gc.text : gc.bgRaised,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      '$value',
+                      style: AppTheme.f(
+                        12,
+                        weight: FontWeight.w700,
+                        color: set.rpe == (rir ? 10 - value : value).toDouble() ? gc.bg : gc.textSecondary,
+                      ),
+                    ),
                   ),
                 ),
               ),
-            ),
+            ],
           ],
-        ],
-      ),
-    ]);
+        ),
+      ],
+    );
   }
 
   Widget _stepper(GymColors gc, String label, String value, VoidCallback onDec, VoidCallback onInc) {
-    return Row(children: [
-      _round(gc, PhosphorIconsBold.minus, onDec, '−$label'),
-      Expanded(
-        child: Column(children: [
-          Text(label, style: AppTheme.f(9.5, weight: FontWeight.w700, color: gc.textTertiary)),
-          Text(value, style: AppTheme.f(15, weight: FontWeight.w800, color: gc.text)),
-        ]),
-      ),
-      _round(gc, PhosphorIconsBold.plus, onInc, '+$label'),
-    ]);
+    return Row(
+      children: [
+        _round(gc, PhosphorIconsBold.minus, onDec, '−$label'),
+        Expanded(
+          child: Column(
+            children: [
+              Text(
+                label,
+                style: AppTheme.f(9.5, weight: FontWeight.w700, color: gc.textTertiary),
+              ),
+              Text(
+                value,
+                style: AppTheme.f(15, weight: FontWeight.w800, color: gc.text),
+              ),
+            ],
+          ),
+        ),
+        _round(gc, PhosphorIconsBold.plus, onInc, '+$label'),
+      ],
+    );
   }
 
   Widget _round(GymColors gc, IconData icon, VoidCallback onTap, String label) {
@@ -730,11 +801,7 @@ class _WearLinkScreenState extends State<WearLinkScreen> {
           height: 42,
           alignment: Alignment.center,
           decoration: BoxDecoration(color: gc.bgRaised2, borderRadius: BorderRadius.circular(16)),
-          child: Icon(
-            icon,
-            size: 16,
-            color: _acting == null ? gc.text : gc.textTertiary,
-          ),
+          child: Icon(icon, size: 16, color: _acting == null ? gc.text : gc.textTertiary),
         ),
       ),
     );

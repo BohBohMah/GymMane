@@ -8,6 +8,20 @@ import org.junit.Test
 
 class WireTest {
     @Test
+    fun gattChunksRespectAttributeLimitAtMaximumMtu() {
+        assertEquals(20, Chunker.gattPayloadSize(23))
+        assertEquals(244, Chunker.gattPayloadSize(247))
+        assertEquals(512, Chunker.gattPayloadSize(517))
+        assertEquals(512, Chunker.gattPayloadSize(Int.MAX_VALUE))
+        val payload = ByteArray(1500) { (it % 251).toByte() }
+        val chunks = Chunker.split(Wire.encode(FrameKind.SECURE, payload), Chunker.gattPayloadSize(517))
+        assertTrue(chunks.all { it.size <= 512 })
+        val reader = FrameReader()
+        val frames = chunks.flatMap { reader.feed(it) }
+        assertArrayEquals(payload, frames.single().payload)
+    }
+
+    @Test
     fun roundTripKeepsKindAndPayload() {
         val payload = "hello".toByteArray()
         val encoded = Wire.encode(FrameKind.HANDSHAKE, payload)

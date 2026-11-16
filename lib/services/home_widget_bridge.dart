@@ -15,6 +15,10 @@ class HomeWidgetBridge {
 
   static const _pkg = 'com.gymmane.app';
   static const appGroup = 'group.com.gymmane.app';
+  /// Test builds use a different application id, so the hardcoded production
+  /// widget names above would target the official GymMane package. Keep test
+  /// builds away from the official app's widgets.
+  static const bool testBuild = bool.fromEnvironment('GYMMANE_TEST_BUILD');
   static const heatmapKey = 'heatmap_img';
   static const statsKey = 'stats_img';
   static const bodyKey = 'body_img';
@@ -27,7 +31,8 @@ class HomeWidgetBridge {
   static const themeKey = 'widget_theme';
   static const bodyDays = 7;
   static bool get _ios => !kIsWeb && Platform.isIOS;
-  static bool get _supported => !kIsWeb && (Platform.isAndroid || Platform.isIOS);
+  static bool get _supported =>
+      !testBuild && !kIsWeb && (Platform.isAndroid || Platform.isIOS);
   static bool _groupReady = false;
   static Timer? _debounce;
   static Future<void>? _job;

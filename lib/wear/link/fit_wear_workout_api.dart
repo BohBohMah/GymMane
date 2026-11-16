@@ -23,6 +23,9 @@ class FitWearWorkoutApi implements WearWorkoutApi {
   int get restTotal => fit.restTotal;
 
   @override
+  String get effortMode => fit.effortMode;
+
+  @override
   String get workoutName {
     final name = fit.session?.name?.trim();
     return name == null || name.isEmpty ? 'GymMane' : name;
@@ -59,8 +62,7 @@ class FitWearWorkoutApi implements WearWorkoutApi {
       fit.setSessionSeconds(exerciseIndex, setIndex, seconds);
 
   @override
-  void setKm(int exerciseIndex, int setIndex, double km) =>
-      fit.setSessionKm(exerciseIndex, setIndex, km);
+  void setKm(int exerciseIndex, int setIndex, double km) => fit.setSessionKm(exerciseIndex, setIndex, km);
 
   @override
   void nextExercise() => fit.nextExercise();

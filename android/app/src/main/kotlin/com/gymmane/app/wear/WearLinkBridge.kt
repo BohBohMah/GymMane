@@ -16,12 +16,14 @@ import io.flutter.plugin.common.MethodChannel
 object WearLinkBridge {
     const val CHANNEL = "gymmane/wearlink"
     private const val REQUEST = 7412
+    private const val NOTIFICATION_REQUEST = 7413
 
     private var activity: Activity? = null
     private var channel: MethodChannel? = null
     private var server: WearGattServer? = null
     private var client: WearGattClient? = null
     private var lastJson: String? = null
+    private var workoutServiceActive = false
 
     private var pendingResult: MethodChannel.Result? = null
     private var pendingAction: (() -> Any?)? = null
@@ -30,8 +32,14 @@ object WearLinkBridge {
     fun attach(activity: Activity, channel: MethodChannel) {
         this.activity = activity
         this.channel = channel
+        WearLinkDiagnostics.initialize(activity.applicationContext)
         channel.setMethodCallHandler { call, result ->
             when (call.method) {
+                "diagnostic" -> {
+                    val message = call.argument<String>("message")
+                    if (message != null) WearLinkDiagnostics.log("dart $message")
+                    result.success(null)
+                }
                 "startServer" -> ensure(true, result) { startServer() }
                 "stop" -> result.success(stopServer())
                 "beginPairing" -> ensure(true, result) { beginPairing() }
@@ -85,8 +93,10 @@ object WearLinkBridge {
         if (this.activity !== activity) return
         server?.stop()
         server = null
-        client?.shutdown()
-        client = null
+        if (!workoutServiceActive) {
+            client?.shutdown()
+            client = null
+        }
         lastJson = null
         pendingResult = null
         pendingAction = null
@@ -95,7 +105,16 @@ object WearLinkBridge {
         this.activity = null
     }
 
+    fun onWorkoutServiceStopped() {
+        workoutServiceActive = false
+        if (activity == null) {
+            client?.shutdown()
+            client = null
+        }
+    }
+
     fun onPermissionResult(requestCode: Int, grantResults: IntArray): Boolean {
+        if (requestCode == NOTIFICATION_REQUEST) return true
         if (requestCode != REQUEST) return false
         val result = pendingResult
         val action = pendingAction
@@ -293,7 +312,12 @@ object WearLinkBridge {
         return client(address, name)?.start(address, name) ?: unsupportedMap()
     }
 
-    private fun stopClient(): Map<String, Any?> = client?.stop() ?: clientStatus()
+    private fun stopClient(): Map<String, Any?> {
+        val result = client?.stop() ?: clientStatus()
+        activity?.applicationContext?.let { WearWorkoutService.stop(it) }
+        workoutServiceActive = false
+        return result
+    }
 
     private fun clientStatus(): Map<String, Any?> =
         client?.statusMap() ?: prefs()?.let {
@@ -311,6 +335,8 @@ object WearLinkBridge {
         } ?: unsupportedMap()
 
     private fun forgetPhone(): Map<String, Any?> {
+        activity?.applicationContext?.let { WearWorkoutService.stop(it) }
+        workoutServiceActive = false
         val store = prefs() ?: return unsupportedMap()
         val target = client ?: client(store.phoneAddress, store.phoneName)
         val status = target?.forget() ?: store.run {
@@ -337,11 +363,34 @@ object WearLinkBridge {
         val current = activity ?: return null
         client?.let { return it }
         val store = WearPrefs(current)
+        val appContext = current.applicationContext
         val created = WearGattClient(
-            context = current.applicationContext,
+            context = appContext,
             prefs = store,
             onEvent = { event -> channel?.invokeMethod("clientEvent", event) },
-            onState = { state -> channel?.invokeMethod("state", state) },
+            onState = { state ->
+                val status = state["status"] as? String
+                val active = status == "active" || status == "paused" || status == "parked"
+                if (active && !workoutServiceActive) {
+                    val foreground = activity
+                    if (Build.VERSION.SDK_INT >= 33 && foreground != null &&
+                        foreground.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
+                            PackageManager.PERMISSION_GRANTED
+                    ) {
+                        runCatching {
+                            foreground.requestPermissions(
+                                arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                                NOTIFICATION_REQUEST,
+                            )
+                        }
+                    }
+                    workoutServiceActive = WearWorkoutService.start(appContext)
+                } else if (!active && workoutServiceActive) {
+                    WearWorkoutService.stop(appContext)
+                    workoutServiceActive = false
+                }
+                channel?.invokeMethod("state", state)
+            },
             onAck = { ack -> channel?.invokeMethod("ack", ack) },
             onPinRequired = { phoneName ->
                 channel?.invokeMethod("pinRequired", mapOf("phoneName" to phoneName))

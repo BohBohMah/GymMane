@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 
 import 'remote_workout.dart';
 import 'wear_command.dart';
+import 'wear_link_diagnostics.dart';
 import 'wear_link_status.dart';
 
 /// A phone the watch is already bonded with.
@@ -39,12 +40,11 @@ class WearLinkClient {
 
   final Map<String, Completer<WearAck>> _pending = {};
   final List<WearCommand> _queue = [];
-  bool _sending = false;
+  String? _sendingId;
   int _rev = 0;
   bool _attached = false;
 
-  bool get _supported =>
-      debugSupportedOverride ?? (!kIsWeb && Platform.isAndroid);
+  bool get _supported => debugSupportedOverride ?? (!kIsWeb && Platform.isAndroid);
 
   /// Test hook so widget/unit tests can exercise the channel on any host.
   @visibleForTesting
@@ -65,7 +65,7 @@ class WearLinkClient {
     }
     _pending.clear();
     _queue.clear();
-    _sending = false;
+    _sendingId = null;
     _rev = 0;
     status.value = const WearLinkStatus();
     workout.value = null;
@@ -78,7 +78,17 @@ class WearLinkClient {
         final raw = call.arguments;
         if (raw is Map) {
           status.value = WearLinkStatus.fromMap(raw);
-          if (!status.value.connected) workout.value = null;
+          wearLinkDiagnostic(
+            'watch native event state=${status.value.state.name} '
+            'enabled=${status.value.enabled} error=${status.value.error}',
+          );
+          if (!status.value.connected) {
+            workout.value = null;
+            pinPrompt.value = null;
+            _failPending('offline');
+          } else {
+            pinPrompt.value = null;
+          }
         }
         return null;
       case 'pinRequired':
@@ -89,7 +99,9 @@ class WearLinkClient {
       case 'state':
         final raw = call.arguments;
         if (raw is Map) {
-          final snapshot = RemoteWorkout.fromJson(Map<String, dynamic>.from(raw));
+          final data = Map<String, dynamic>.from(raw);
+          wearLinkDiagnostic('watch Dart received state ${wearSnapshotSummary(data)}');
+          final snapshot = RemoteWorkout.fromJson(data);
           _rev = snapshot.rev;
           workout.value = snapshot;
         }
@@ -111,9 +123,10 @@ class WearLinkClient {
       message: raw['message'] as String?,
     );
     if (ack.rev > _rev) _rev = ack.rev;
-    _sending = false;
     final completer = _pending.remove(ack.id);
     if (completer != null && !completer.isCompleted) completer.complete(ack);
+    if (_sendingId != ack.id) return;
+    _sendingId = null;
     if (ack.code == 'conflict') unawaited(requestState());
     _pump();
   }
@@ -122,9 +135,7 @@ class WearLinkClient {
     if (!_supported) return const [];
     try {
       final raw = await _channel.invokeMethod<List>('bondedDevices');
-      return [
-        for (final item in raw ?? const []) ?WearBondedDevice.fromMap(item),
-      ];
+      return [for (final item in raw ?? const []) ?WearBondedDevice.fromMap(item)];
     } catch (_) {
       return const [];
     }
@@ -141,7 +152,11 @@ class WearLinkClient {
   Future<void> resume() async {
     if (!_supported) return;
     final current = await refresh();
-    if (!current.enabled || current.address.isEmpty || current.connected) return;
+    if (current.connected) {
+      await requestState();
+      return;
+    }
+    if (!current.enabled || current.address.isEmpty) return;
     await connect(current.address, current.deviceName);
   }
 
@@ -213,6 +228,10 @@ class WearLinkClient {
     } on TimeoutException {
       _pending.remove(id);
       _queue.removeWhere((command) => command.id == id);
+      if (_sendingId == id) {
+        _sendingId = null;
+        _pump();
+      }
       return WearAck(id: id, ok: false, rev: _rev, code: 'timeout');
     }
   }
@@ -263,9 +282,10 @@ class WearLinkClient {
   Future<WearAck> nudgeRest(int seconds) => command('nudgeRest', args: {'seconds': seconds});
 
   void _pump() {
-    if (_sending || _queue.isEmpty) return;
-    final command = _queue.removeAt(0);
-    _sending = true;
+    if (_sendingId != null || _queue.isEmpty) return;
+    final queued = _queue.removeAt(0);
+    final command = WearCommand(id: queued.id, baseRev: _rev, action: queued.action, args: queued.args);
+    _sendingId = command.id;
     unawaited(_send(command));
   }
 
@@ -273,13 +293,24 @@ class WearLinkClient {
     try {
       await _channel.invokeMethod<void>('sendCommand', command.toJson());
     } catch (_) {
-      _sending = false;
+      if (_sendingId == command.id) _sendingId = null;
       final completer = _pending.remove(command.id);
       if (completer != null && !completer.isCompleted) {
         completer.complete(WearAck(id: command.id, ok: false, rev: _rev, code: 'error'));
       }
       _pump();
     }
+  }
+
+  void _failPending(String code) {
+    for (final entry in _pending.entries) {
+      if (!entry.value.isCompleted) {
+        entry.value.complete(WearAck(id: entry.key, ok: false, rev: _rev, code: code));
+      }
+    }
+    _pending.clear();
+    _queue.clear();
+    _sendingId = null;
   }
 
   static String _newId() {

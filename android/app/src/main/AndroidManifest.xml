@@ -11,6 +11,8 @@
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT"/>
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE"/>
     <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE"
         android:usesPermissionFlags="neverForLocation"/>
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>
@@ -34,7 +36,7 @@
     <uses-permission android:name="android.permission.health.WRITE_EXERCISE"/>
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" tools:node="remove"/>
 
-    <uses-sdk tools:overrideLibrary="androidx.wear.tiles, androidx.wear.protolayout, androidx.wear.protolayout.expression, androidx.wear.protolayout.expression.pipeline,androidx.wear.protolayout.proto, androidx.wear.watchface.complications.datasource, androidx.wear.watchface.complications.data, androidx.wear.watchface.complications, androidx.wear.watchface.complications.data.source, androidx.wear.watchface.data, androidx.wear.watchface.style.data"/>
+    <uses-sdk tools:overrideLibrary="androidx.wear.ongoing, androidx.wear.tiles, androidx.wear.protolayout, androidx.wear.protolayout.expression, androidx.wear.protolayout.expression.pipeline,androidx.wear.protolayout.proto, androidx.wear.watchface.complications.datasource, androidx.wear.watchface.complications.data, androidx.wear.watchface.complications, androidx.wear.watchface.complications.data.source, androidx.wear.watchface.data, androidx.wear.watchface.style.data"/>
 
     <uses-feature android:name="android.hardware.type.watch" android:required="false"/>
     <uses-feature android:name="android.hardware.touchscreen" android:required="false"/>
@@ -42,11 +44,15 @@
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="false"/>
 
     <application
-        android:label="GymMane"
+        android:label="${gymmaneLabel}"
         android:name=".GymManeApplication"
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
         android:enableOnBackInvokedCallback="true">
+        <service
+            android:name=".wear.WearWorkoutService"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice" />
         <meta-data android:name="com.google.android.wearable.standalone" android:value="true"/>
         <service
             android:name=".GymTileService"
@@ -103,7 +109,7 @@
             android:exported="true"
             android:icon="@mipmap/ic_launcher"
             android:roundIcon="@mipmap/ic_launcher"
-            android:label="GymMane"
+            android:label="${gymmaneLabel}"
             android:targetActivity=".MainActivity">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
@@ -119,7 +125,7 @@
             android:exported="true"
             android:icon="@mipmap/ic_launcher_light"
             android:roundIcon="@mipmap/ic_launcher_light"
-            android:label="GymMane"
+            android:label="${gymmaneLabel}"
             android:targetActivity=".MainActivity">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
@@ -135,7 +141,7 @@
             android:exported="true"
             android:icon="@mipmap/ic_launcher_sand"
             android:roundIcon="@mipmap/ic_launcher_sand"
-            android:label="GymMane"
+            android:label="${gymmaneLabel}"
             android:targetActivity=".MainActivity">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
@@ -151,7 +157,7 @@
             android:exported="true"
             android:icon="@mipmap/ic_launcher_graphite"
             android:roundIcon="@mipmap/ic_launcher_graphite"
-            android:label="GymMane"
+            android:label="${gymmaneLabel}"
             android:targetActivity=".MainActivity">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
@@ -167,7 +173,7 @@
             android:exported="true"
             android:icon="@mipmap/ic_launcher_sage"
             android:roundIcon="@mipmap/ic_launcher_sage"
-            android:label="GymMane"
+            android:label="${gymmaneLabel}"
             android:targetActivity=".MainActivity">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
@@ -183,7 +189,7 @@
             android:exported="true"
             android:icon="@mipmap/ic_launcher_night"
             android:roundIcon="@mipmap/ic_launcher_night"
-            android:label="GymMane"
+            android:label="${gymmaneLabel}"
             android:targetActivity=".MainActivity">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
@@ -199,7 +205,7 @@
             android:exported="true"
             android:icon="@mipmap/ic_launcher_material"
             android:roundIcon="@mipmap/ic_launcher_material"
-            android:label="GymMane"
+            android:label="${gymmaneLabel}"
             android:targetActivity=".MainActivity">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
@@ -215,7 +221,7 @@
             android:exported="true"
             android:icon="@mipmap/ic_launcher_medal"
             android:roundIcon="@mipmap/ic_launcher_medal"
-            android:label="GymMane"
+            android:label="${gymmaneLabel}"
             android:targetActivity=".MainActivity">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
@@ -231,7 +237,7 @@
             android:exported="true"
             android:icon="@mipmap/ic_launcher_glass"
             android:roundIcon="@mipmap/ic_launcher_glass"
-            android:label="GymMane"
+            android:label="${gymmaneLabel}"
             android:targetActivity=".MainActivity">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
@@ -247,7 +253,7 @@
             android:exported="true"
             android:icon="@mipmap/ic_launcher_stopwatch"
             android:roundIcon="@mipmap/ic_launcher_stopwatch"
-            android:label="GymMane"
+            android:label="${gymmaneLabel}"
             android:targetActivity=".MainActivity">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
@@ -263,7 +269,7 @@
             android:exported="true"
             android:icon="@mipmap/ic_launcher_marble"
             android:roundIcon="@mipmap/ic_launcher_marble"
-            android:label="GymMane"
+            android:label="${gymmaneLabel}"
             android:targetActivity=".MainActivity">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
@@ -281,7 +287,7 @@
             <intent-filter>
                 <action android:name="android.nfc.action.NDEF_DISCOVERED"/>
                 <category android:name="android.intent.category.DEFAULT"/>
-                <data android:scheme="gymmane" android:host="today"/>
+                <data android:scheme="${gymmaneScheme}" android:host="today"/>
             </intent-filter>
         </activity-alias>
         <activity-alias

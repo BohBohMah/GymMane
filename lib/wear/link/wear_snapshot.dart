@@ -42,16 +42,17 @@ class WearSnapshotBuilder {
   String fingerprint() => jsonEncode(_semantic(api.session));
 
   Map<String, dynamic> _semantic(WorkoutSession? session) => {
-        'status': _status(session),
-        'workoutId': workoutId(),
-        'name': api.workoutName,
-        'startedAt': session?.loggedAt?.toIso8601String(),
-        'currentIndex': session?.currentIndex ?? 0,
-        'paused': api.paused,
-        'rest': _rest(session),
-        'summary': _summary(session),
-        'exercises': _exercises(session),
-      };
+    'status': _status(session),
+    'workoutId': workoutId(),
+    'name': api.workoutName,
+    'startedAt': session?.loggedAt?.toIso8601String(),
+    'currentIndex': session?.currentIndex ?? 0,
+    'paused': api.paused,
+    'effortMode': api.effortMode,
+    'rest': _rest(session),
+    'summary': _summary(session),
+    'exercises': _exercises(session),
+  };
 
   String _status(WorkoutSession? session) {
     if (session == null) return 'idle';
@@ -99,24 +100,23 @@ class WearSnapshotBuilder {
           'primary': exercise.primary,
           'linkedNext': exercise.linkedNext,
           'sets': [
-            for (var index = 0; index < exercise.sets.length; index++)
-              _set(index, exercise.sets[index]),
+            for (var index = 0; index < exercise.sets.length; index++) _set(index, exercise.sets[index]),
           ],
         },
     ];
   }
 
   Map<String, dynamic> _set(int index, SessionSet set) => {
-        'index': index,
-        'reps': set.reps,
-        if (set.repsR != null) 'repsRight': set.repsR,
-        'weight': set.weight,
-        'done': set.done,
-        if (set.half && !set.done) 'half': true,
-        'kind': set.kind.name,
-        if (set.rpe != null) 'rpe': set.rpe,
-        if (set.sec != null) 'sec': set.sec,
-        if (set.km != null) 'km': set.km,
-        if (set.note.isNotEmpty) 'note': set.note,
-      };
+    'index': index,
+    'reps': set.reps,
+    if (set.repsR != null) 'repsRight': set.repsR,
+    'weight': set.weight,
+    'done': set.done,
+    if (set.half && !set.done) 'half': true,
+    'kind': set.kind.name,
+    if (set.rpe != null) 'rpe': set.rpe,
+    if (set.sec != null) 'sec': set.sec,
+    if (set.km != null) 'km': set.km,
+    if (set.note.isNotEmpty) 'note': set.note,
+  };
 }

@@ -19,6 +19,8 @@ class FakeWearApi implements WearWorkoutApi {
   @override
   int restTotal = 90;
   @override
+  String effortMode = '';
+  @override
   String workoutName = 'Push day';
 
   @override
@@ -110,8 +112,7 @@ class FakeWearApi implements WearWorkoutApi {
   void togglePause() => paused = !paused;
 
   @override
-  void toggleSet(int exercise, int set) =>
-      _set(exercise, set, (value) => value.done = !value.done);
+  void toggleSet(int exercise, int set) => _set(exercise, set, (value) => value.done = !value.done);
 }
 
 FakeWearApi apiWithSession({bool withRest = false}) {
@@ -120,10 +121,7 @@ FakeWearApi apiWithSession({bool withRest = false}) {
     ..loggedAt = DateTime(2026, 11, 15, 18)
     ..currentIndex = 0;
   session.exercises = [
-    SessionExercise('bench', 'Bench press', 'chest', [
-      SessionSet(8, 60, false),
-      SessionSet(8, 62.5, false),
-    ]),
+    SessionExercise('bench', 'Bench press', 'chest', [SessionSet(8, 60, false), SessionSet(8, 62.5, false)]),
     SessionExercise('row', 'Row', 'back', [
       SessionSet(10, 40, true),
       SessionSet(10, 42.5, false),
@@ -160,6 +158,19 @@ void main() {
     });
   });
 
+  test('snapshot follows phone effort mode and changes fingerprint', () {
+    final api = apiWithSession();
+    final builder = WearSnapshotBuilder(api);
+    final off = builder.fingerprint();
+    expect(RemoteWorkout.fromJson(builder.build(rev: 1, bootId: 'b')).effortMode, '');
+    api.effortMode = 'rpe';
+    expect(builder.fingerprint(), isNot(off));
+    expect(RemoteWorkout.fromJson(builder.build(rev: 2, bootId: 'b')).effortMode, 'rpe');
+    api.effortMode = 'rir';
+    expect(RemoteWorkout.fromJson(builder.build(rev: 3, bootId: 'b')).effortMode, 'rir');
+    expect(RemoteWorkout.fromJson({'effortMode': 'unexpected'}).effortMode, '');
+  });
+
   group('WearCommandExecutor', () {
     test('completes the current pending set', () {
       final api = apiWithSession();
@@ -171,10 +182,9 @@ void main() {
 
     test('completing an already done set changes nothing', () {
       final api = apiWithSession();
-      final result = WearCommandExecutor(api).execute(
-        command('completeSet', args: const {'exerciseIndex': 1, 'setIndex': 0}),
-        0,
-      );
+      final result = WearCommandExecutor(
+        api,
+      ).execute(command('completeSet', args: const {'exerciseIndex': 1, 'setIndex': 0}), 0);
       expect(result.ok, isTrue);
       expect(result.changed, isFalse);
       expect(api.session!.exercises[1].sets[0].done, isTrue);
@@ -221,10 +231,7 @@ void main() {
     test('sets and clears RPE', () {
       final api = apiWithSession();
       final executor = WearCommandExecutor(api);
-      executor.execute(
-        command('updateSet', args: const {'exerciseIndex': 0, 'setIndex': 0, 'rpe': 8.0}),
-        0,
-      );
+      executor.execute(command('updateSet', args: const {'exerciseIndex': 0, 'setIndex': 0, 'rpe': 8.0}), 0);
       expect(api.session!.exercises[0].sets[0].rpe, 8);
       final cleared = executor.execute(
         command('updateSet', args: const {'exerciseIndex': 0, 'setIndex': 0, 'rpe': null}),
@@ -254,10 +261,7 @@ void main() {
       final api = apiWithSession(withRest: true);
       final executor = WearCommandExecutor(api);
       final before = api.session!.restEndsAt!;
-      final nudge = executor.execute(
-        command('nudgeRest', args: const {'seconds': 15}),
-        0,
-      );
+      final nudge = executor.execute(command('nudgeRest', args: const {'seconds': 15}), 0);
       expect(nudge.ok, isTrue);
       expect(api.session!.restEndsAt!.difference(before).inSeconds, 15);
 
@@ -270,25 +274,18 @@ void main() {
       final api = apiWithSession(withRest: true);
       final executor = WearCommandExecutor(api);
       final before = api.session!.restEndsAt!;
-      final down = executor.execute(
-        command('nudgeRest', args: const {'seconds': -15}),
-        0,
-      );
+      final down = executor.execute(command('nudgeRest', args: const {'seconds': -15}), 0);
       expect(down.ok, isTrue);
       expect(api.session!.restEndsAt!.difference(before).inSeconds, -15);
-      final zero = executor.execute(
-        command('nudgeRest', args: const {'seconds': 0}),
-        0,
-      );
+      final zero = executor.execute(command('nudgeRest', args: const {'seconds': 0}), 0);
       expect(zero.code, 'invalid');
     });
 
     test('an explicit but out of range set is invalid, never a fallback', () {
       final api = apiWithSession();
-      final result = WearCommandExecutor(api).execute(
-        command('completeSet', args: const {'exerciseIndex': 0, 'setIndex': 9}),
-        0,
-      );
+      final result = WearCommandExecutor(
+        api,
+      ).execute(command('completeSet', args: const {'exerciseIndex': 0, 'setIndex': 9}), 0);
       expect(result.ok, isFalse);
       expect(result.code, 'invalid');
       expect(api.session!.exercises[0].sets.any((set) => set.done), isFalse);
@@ -296,19 +293,13 @@ void main() {
 
     test('nudging without rest is invalid', () {
       final api = apiWithSession();
-      final result = WearCommandExecutor(api).execute(
-        command('nudgeRest', args: const {'seconds': 15}),
-        0,
-      );
+      final result = WearCommandExecutor(api).execute(command('nudgeRest', args: const {'seconds': 15}), 0);
       expect(result.code, 'invalid');
     });
 
     test('rejects an out of range exercise', () {
       final api = apiWithSession();
-      final result = WearCommandExecutor(api).execute(
-        command('goToExercise', args: const {'index': 9}),
-        0,
-      );
+      final result = WearCommandExecutor(api).execute(command('goToExercise', args: const {'index': 9}), 0);
       expect(result.code, 'invalid');
     });
 
@@ -397,9 +388,7 @@ void main() {
     });
 
     test('an empty snapshot stays idle', () {
-      final remote = RemoteWorkout.fromJson(
-        WearSnapshotBuilder(FakeWearApi()).build(rev: 1, bootId: 'b'),
-      );
+      final remote = RemoteWorkout.fromJson(WearSnapshotBuilder(FakeWearApi()).build(rev: 1, bootId: 'b'));
       expect(remote.hasWorkout, isFalse);
       expect(remote.exercises, isEmpty);
       expect(remote.currentExercise, isNull);

@@ -4,11 +4,251 @@
 
 - Date: 2026-11-15.
 - Branch: `feature/wear-os-offline`.
-- The implementation is **code-complete for the agreed scope** and
-  **hardware-unverified**. All automated checks that can run in this
-  environment were run; real BLE behaviour was not, because no physical phone +
-  Wear OS watch pair was available and an emulator cannot validate it.
+- The companion implementation is **code-complete for the agreed scope**.
+  Isolated phone and Wear test APKs have now been built and statically verified.
+  A physical phone + Wear OS watch pair was exercised, but end-to-end workout
+  snapshot delivery remains **unverified and currently failing**.
 - Nothing was pushed. Commits are small and local only.
+
+## 1a. Real-device test preparation (2026-11-15)
+
+The interrupted build-preparation edits were recovered, completed and checked.
+Files added/changed for this preparation:
+
+- `android/app/build.gradle.kts`: opt-in `gymmaneTestVariant=phone|wear`,
+  distinct application IDs, watch API 31 minimum, test-only release manifest
+  overlays and local debug signing. With the property unset, the production
+  application ID/signing behavior remains unchanged.
+- `android/app/src/phoneTest/` and `android/app/src/wearTest/`: role-specific
+  manifest overlays and static-shortcut targets.
+- `android/app/src/main/AndroidManifest.xml`: test label/scheme placeholders;
+  normal production values remain GymMane and `gymmane`.
+- `lib/services/home_widget_bridge.dart`: test builds do not invoke production
+  home-widget calls.
+- `docs/wearos/REAL_DEVICE_TEST.md`: beginner-friendly Windows/ADB install and
+  test procedure.
+
+Artifacts:
+
+| APK | Application ID | Minimum | Notes |
+| --- | --- | --- | --- |
+| `build/app/outputs/flutter-apk/GymMane-test-phone.apk` | `com.gymmane.test.phone` | API 24; companion BLE link requires API 31+ | `lib/main.dart`; BLE advertise + connect |
+| `build/app/outputs/flutter-apk/GymMane-test-watch.apk` | `com.gymmane.test.wear` | API 31 | `lib/main_wear_companion.dart`; required Wear + BLE features; connect + vibrate |
+
+Both test APKs are builds signed with the local Android debug key
+(SHA-256 `b731e5b0dfeee1046596c49dafdf0496300817dab65ad3db7acb225d8c259e52`).
+Neither requests `INTERNET`, `BLUETOOTH_SCAN`, or location permissions. Test
+provider authorities and static shortcut package targets use test IDs. The
+default production `app-release.apk` was rebuilt after the test builds and
+verified as `com.gymmane.app`.
+
+Validation: Flutter analyze clean; 30 Wear Dart tests pass; Kotlin protocol
+tests 36 pass; full Flutter suite 1171 pass / 3 skipped / 1 known localization
+failure (`test/i18n_test.dart`). The test APKs passed package/min-SDK,
+permission, watch/BLE feature and signing inspection. At this preparation stage
+no devices were attached and no APK was installed by the build environment.
+See §1b for subsequent owner-run physical evidence.
+
+## 1b. First physical test and diagnostic build (2026-11-15)
+
+The owner installed the test APKs and exercised the HONOR Magic8 Lite and
+Galaxy Watch4 Classic (SM-R890, Wear OS 6.0; API 36 on both devices). Phone app
+reported `Connected to
+…`; the test phone showed a live session, but the watch remained on “No workout
+running on the phone,” including after Refresh and a set change.
+
+ADB/logcat evidence after reopening the watch app:
+
+- Watch GATT client reconnected with status 0.
+- MTU negotiation completed with MTU 517 and status 0.
+- GATT service discovery completed with status 0.
+- No relevant app crash was found. A later watch log showed that its app task had
+  been removed and Android killed that process; reopening it caused the GATT
+  reconnect. This explains that disconnect, but does not explain the missing
+  active workout snapshot.
+- The screen’s no-workout message cannot distinguish an idle snapshot from no
+  snapshot received. That is the remaining diagnostic question.
+
+Added gated, metadata-only tracing to:
+
+- `lib/wear/link/wear_link_diagnostics.dart`,
+  `wear_link_server.dart`, `wear_link_client.dart`;
+- `android/app/src/main/kotlin/com/gymmane/app/wear/WearLinkDiagnostics.kt`,
+  `WearGattServer.kt`, `WearGattClient.kt`;
+- `android/app/build.gradle.kts` and
+  `test/wear/wear_link_diagnostics_test.dart`.
+
+Tracing reports only state/revision/exercise counts, command action names and
+transport stages/result codes. It never records workout/exercise names, set
+values, PINs, Bluetooth addresses or payloads. Native tracing is compiled on
+only for test APK variants; Dart tracing also needs
+`--dart-define=GYMMANE_WEAR_DIAGNOSTICS=true`.
+
+Updated test APKs were built and statically verified at the same paths and IDs:
+`GymMane-test-phone.apk` (`com.gymmane.test.phone`) and
+`GymMane-test-watch.apk` (`com.gymmane.test.wear`). Both use the existing test
+debug certificate and contain the diagnostic tracing. The production
+`app-release.apk` was restored to `com.gymmane.app`; its generated
+`GYMMANE_WEAR_DIAGNOSTICS` flag is false. **The updated APKs were not installed**:
+at the time of this entry, the owner had not yet authorized device updates. On
+2026-11-16, the owner explicitly authorized installation; both test APKs were
+updated with `adb install -r` on their respective devices. Installation
+succeeded and preserved each package ID/version. The official
+`com.gymmane.app` was not touched.
+
+## 1c. Diagnostic reproduction and captured logs (2026-11-16)
+
+The owner connected the two test apps, started/completed sets, stopped that
+workout, started another and tapped Refresh several times. The complete
+logcat buffers were captured from both devices and stored locally under
+`%TEMP%\gymmane-wear-test`; only relevant lines were reviewed.
+
+Watch-side evidence:
+
+- First GATT connection attempt returned status 0 at connection, but a later
+  characteristic-write callback returned status 133. The client retried.
+- The retry connected, negotiated MTU 517, discovered the service, enabled
+  indications and completed the stored-key handshake.
+- The watch requested state and received two snapshots, both `idle`,
+  `hasWorkout=false`, `exercises=0` (revisions 1 and 2). The following command
+  acknowledgement was successful.
+- Eight later Refresh requests were logged as sent/write-started, but no
+  subsequent state or acknowledgement appeared in the watch log.
+- No fatal crash from the GymMane watch process was found. An unrelated
+  `GlanceAppWidget` NPE was present.
+
+Phone-side evidence:
+
+- The test phone process was running in the foreground and the installed package
+  was `com.gymmane.test.phone` version 2.3.0 (versionCode 14).
+- No `GymManeWearLink` lines, Flutter diagnostic lines, or app-process lines
+  appeared in any captured logcat buffer. Thus this capture cannot establish
+  whether the phone prepared an active snapshot, received the later Refresh
+  writes, or emitted responses.
+
+Conclusion: the watch's GATT/handshake path works intermittently, but the
+captured state was idle and later Refresh responses are absent. The phone-side
+silence leaves the precise failing stage unresolved; do not claim a functional
+fix yet. The full raw logs remain local and should not be committed or shared
+without filtering.
+
+## 1d. Persistent trace build (2026-11-16)
+
+The preceding logcat capture had no phone-side app output. Added an app-private,
+bounded (`128 KiB`) metadata trace at `files/wearlink-diagnostics.log`. Dart
+events are forwarded over the existing local MethodChannel to the native
+logger; Kotlin transport events append to the same file. It retains only the
+last 128 KiB, records state/revision/counts and transport outcomes, and never
+stores workout names, set values, PINs, addresses or payloads. The file can be
+read from a test build using:
+
+```powershell
+adb -s $phone shell run-as com.gymmane.test.phone cat files/wearlink-diagnostics.log
+adb -s $watch shell run-as com.gymmane.test.wear cat files/wearlink-diagnostics.log
+```
+
+An initial attempt to make a Flutter **release** APK debuggable failed at
+runtime (`Precompiled runtime requires a precompiled snapshot`). Corrected by
+building the test packages as genuine `--debug` variants and applying the
+role-specific manifest/resource overlays to both debug and release build types.
+The debug test manifests still remove `INTERNET`; only the test packages are
+debuggable. Both debug APKs were installed in-place with `adb install -r`,
+preserving app data and package IDs. No production APK was installed.
+
+The phone process initialized the persistent logger after the update. Both app
+tasks are currently sleeping/locked, so Dart initialization has not yet emitted
+the phone attach event and no fresh session trace is available. A physical
+screen unlock/wake is required before the next capture. Do not diagnose sync
+from the pre-update trace or claim a functional fix yet.
+
+## 1e. Offline code review and fixes (2026-11-16)
+
+At the owner's request, no further device testing or installation was performed.
+The watch PIN screen now has its own numeric keypad instead of depending on a
+system IME. The watch command queue only advances on its own acknowledgement,
+recovers from a timeout, fails outstanding commands on disconnect, and assigns
+the latest revision when dispatching queued commands. The phone schedules a
+follow-up snapshot for changes occurring while a command is being applied.
+The GATT server waits for service registration before advertising, rejects a
+second peer, disconnects after failed indications, and avoids replying to a
+command on a replacement session. Missing snapshots are distinguished from
+explicit idle state, and the watch elapsed timer no longer freezes for sessions
+without a start timestamp.
+
+Automated evidence: 33 Wear Dart tests pass, `flutter analyze` reports no
+issues, the 36 Kotlin protocol tests pass, and both release test APKs compile.
+The release test artifacts in `build/app/outputs/flutter-apk/` have the expected
+test IDs, are non-debuggable, and do not request `INTERNET`, network state,
+Bluetooth scanning, or location. They were **not installed** during this review;
+the devices still have the prior debug diagnostic builds. The root cause of the
+physical idle symptom is not proven and none of these changes has been validated
+on hardware.
+
+## 1f. Physical crash identified (2026-11-16)
+
+After the owner paired successfully, Android's `data_app_crash` report on the
+HONOR showed `IllegalArgumentException: notification should not be longer than
+max length of an attribute value` from `BluetoothGattServer.notifyCharacteristicChanged`,
+while sending an active workout snapshot. With negotiated MTU 517 the previous
+code split frames at 514 bytes (`MTU - 3`), exceeding Android's 512-byte GATT
+attribute value limit. The watch logs showed successful handshake followed by
+write errors matching the phone crash times.
+
+Both client and server now compute chunk size as `min(max(MTU,23)-3,512)`.
+Server indication invocation exceptions are handled as transport failures rather
+than uncaught process crashes. The protocol regression test checks MTUs 23, 247,
+517, large values, and reassembles a frame exceeding 512 bytes. Kotlin protocol
+tests, 33 Wear Dart tests, `flutter analyze` and both test APK builds passed.
+Manifest inspection confirms neither APK requests `INTERNET`, network state,
+scan or location permissions. Updated APKs were built but not installed or
+verified on physical devices; the owner had requested no device testing.
+
+## 1g. Watch rest and text rendering (2026-11-16)
+
+The owner subsequently reported the link appeared to work, but rest was not
+shown and all watch text had yellow underlines. Code review identified that
+the standalone companion lacked a Material `Scaffold`, and nested rest/summary
+maps from `StandardMethodCodec` were incorrectly cast to
+`Map<String, dynamic>`. The companion now has a `Scaffold` and parses nested
+maps without assuming their generic key type. A channel-level Dart test checks
+that nested rest and summary data survive the actual method codec.
+
+34 Wear tests and `flutter analyze` pass. A new non-debuggable watch test APK
+was built and checked for the correct test ID and absence of `INTERNET`, network
+state, scan and location permissions. It was not installed or tested on the
+watch by the assistant. The owner-observed link success and the two fixes still
+require physical confirmation.
+
+## 1h. Scroll fade and effort mode
+
+The top fade in `WearPage` now occupies a smaller fraction of the screen.
+The phone snapshot carries `effortMode` (`rpe`, `rir`, or empty), included in
+the semantic fingerprint so preference changes propagate. The watch hides
+effort controls when the mode is empty, displays RPE or RIR otherwise, and
+converts RIR to the phone's canonical RPE (`10 - RIR`). Older snapshots without
+the field default to no effort controls. Updating both test APKs is required.
+35 Wear Dart tests pass, Flutter analysis is clean, and both test release APKs
+were rebuilt with no Internet, network state, scan or location permissions.
+They were not installed or tested on hardware.
+
+## 1i. Ongoing workout on Wear OS
+
+The watch now starts a `connectedDevice` foreground service and posts an
+AndroidX Wear Ongoing Activity when an active, paused or parked workout state
+arrives. The notification has a tap intent back to the app. While that service
+is active, engine teardown does not shut down the existing GATT client; reopening
+an already-connected client requests a fresh snapshot. An idle/complete
+snapshot, explicit disconnect or forget stops the service. Notification
+permission is requested when needed. The service does not automatically restart
+after process death, and Android can still end it or restrict background starts.
+The phone remains authoritative.
+
+36 Wear Dart tests and Flutter analysis pass; both test APKs compile, and their
+manifests have no INTERNET, network state, scan or location permission. The
+watch now requests notification and connected-device foreground-service
+permissions. Icon visibility, background starts, standby, process termination
+and reconnection are **not hardware-verified**. The updated APKs were not
+installed by the assistant.
 
 ## 2. Commits in this feature
 
@@ -182,7 +422,7 @@ Standalone JVM Gradle project compiled into the app module.
 | What | Command | Result |
 | --- | --- | --- |
 | Protocol unit tests | `.\android\gradlew.bat -p packages\wear_protocol test` | **BUILD SUCCESSFUL**, 36 tests, 0 failures |
-| Dart Wear tests | `& $FLUTTER test test\wear\` | **28 tests pass** |
+| Dart Wear tests | `& $FLUTTER test test\wear\` | **30 tests pass** |
 | Static analysis | `& $FLUTTER analyze` | **No issues found!** |
 | Full Flutter suite | `& $FLUTTER test` | **1171 pass / 3 skip / 1 failure** |
 | Companion entry bundle | `& $FLUTTER build bundle -t lib\main_wear_companion.dart` | exit 0 |
@@ -213,8 +453,13 @@ test was modified to hide anything.
 
 ## 9. First precise task on resume
 
-Run the real-device procedure in `docs/wearos/BLE_FEASIBILITY.md` §6 on at least
-two phone/watch pairs, starting with:
+Use `docs/wearos/REAL_DEVICE_TEST.md` for exact Windows/ADB commands and the
+HONOR Magic8 Lite + Galaxy Watch4 Classic sequence. Check the OS API level on
+both devices first (31+ required for the link), bond them in system Bluetooth
+settings, and install only the two `GymMane-test-*.apk` files. Never uninstall,
+clear, overwrite or update `com.gymmane.app`.
+
+On the available target pair, start with:
 
 1. bond the phone and watch in system settings;
 2. enable Settings → **Smartwatch link** on the phone and tap **PAIR A WATCH**;
@@ -224,8 +469,8 @@ two phone/watch pairs, starting with:
    appears only after the phone shows the set done;
 5. record pairing time, MTU, reconnect behaviour, duplicate/stale handling and
    any logcat errors;
-6. repeat with Wi-Fi and mobile data off, then inspect the installed package for
-   `INTERNET`/`BLUETOOTH_SCAN`/location permissions.
+6. repeat with Wi-Fi and mobile data off, then record results without exposing
+   personal workout or device data.
 
 If hardware is still unavailable, the honest next step is to keep the code
 frozen and update `IMPLEMENTATION_STATUS.md` only with new evidence.
@@ -252,6 +497,20 @@ $FLUTTER='C:\Users\Claudio\AppData\Local\Temp\opencode\flutter-3.41\bin\flutter.
 
 # Companion entry point compile check
 & $FLUTTER build bundle -t lib\main_wear_companion.dart
+
+# Isolated debuggable test APKs (copy Gradle's output after each build)
+& $FLUTTER build apk --debug -t lib\main.dart `
+  --android-project-arg=gymmaneTestVariant=phone `
+  --dart-define=GYMMANE_TEST_BUILD=true `
+  --dart-define=GYMMANE_WEAR_DIAGNOSTICS=true
+Copy-Item build\app\outputs\apk\debug\app-debug.apk `
+  build\app\outputs\flutter-apk\GymMane-test-phone.apk
+& $FLUTTER build apk --debug -t lib\main_wear_companion.dart `
+  --android-project-arg=gymmaneTestVariant=wear `
+  --dart-define=GYMMANE_TEST_BUILD=true `
+  --dart-define=GYMMANE_WEAR_DIAGNOSTICS=true
+Copy-Item build\app\outputs\apk\debug\app-debug.apk `
+  build\app\outputs\flutter-apk\GymMane-test-watch.apk
 
 # Release APK
 & $FLUTTER build apk --release

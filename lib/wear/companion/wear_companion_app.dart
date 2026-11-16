@@ -28,7 +28,7 @@ class WearCompanionApp extends StatelessWidget {
           GlobalWidgetsLocalizations.delegate,
           GlobalCupertinoLocalizations.delegate,
         ],
-        home: const WearLinkScreen(),
+        home: const Scaffold(body: WearLinkScreen()),
       ),
     );
   }
