@@ -481,6 +481,8 @@ class WearGattServer(
         val frame = try {
             Wire.encode(kind, payload)
         } catch (_: Exception) {
+            WearLinkDiagnostics.log("phone frame rejected: too large")
+            fail("frame_too_large")
             return
         }
         queue.addAll(Chunker.split(frame, Chunker.gattPayloadSize(mtu)))

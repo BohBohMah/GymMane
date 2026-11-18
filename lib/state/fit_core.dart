@@ -183,6 +183,8 @@ abstract class FitCore extends ChangeNotifier {
   int weekStartDay = DateTime.monday;
   bool _loading = false;
   Timer? _saveDebounce;
+  bool _wearTransaction = false;
+  final Map<String, String> wearAppliedOperations = {};
 
   void refreshAwards({bool silent = false}) {}
 
@@ -220,7 +222,7 @@ abstract class FitCore extends ChangeNotifier {
 
   void _persist() {
     _dataRev++;
-    if (_loading) return;
+    if (_loading || _wearTransaction) return;
     _saveDebounce?.cancel();
     _saveDebounce = Timer(const Duration(milliseconds: 400), persistNow);
   }
@@ -229,7 +231,7 @@ abstract class FitCore extends ChangeNotifier {
     _dataRev++;
     _saveDebounce?.cancel();
     _saveDebounce = null;
-    if (_loading) return;
+    if (_loading || _wearTransaction) return;
     _storing = {};
     try {
       final data = toJson();
@@ -237,6 +239,28 @@ abstract class FitCore extends ChangeNotifier {
     } finally {
       _storing = null;
     }
+  }
+
+  /// Suppress intermediate saves while a watch command is being applied.
+  /// The mutation and its deduplication record are saved together afterwards.
+  T applyWearTransaction<T>(T Function() apply) {
+    if (_wearTransaction) throw StateError('nested wear transaction');
+    _saveDebounce?.cancel();
+    _saveDebounce = null;
+    _wearTransaction = true;
+    try {
+      return apply();
+    } finally {
+      _wearTransaction = false;
+    }
+  }
+
+  Future<void> persistWearTransaction() {
+    if (_loading) throw StateError('state is loading');
+    _saveDebounce?.cancel();
+    _saveDebounce = null;
+    // Avoid the cached raw session serialization for this critical write.
+    return Store.instance.saveChecked(toJson());
   }
 
   Map<String, String>? _storing;

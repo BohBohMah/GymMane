@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
 import io.flutter.plugin.common.MethodChannel
+import org.json.JSONObject
 
 /**
  * Flutter bridge for the direct phone/watch link. It exposes both roles on the
@@ -49,6 +50,19 @@ object WearLinkBridge {
                 "update" -> {
                     lastJson = call.argument<String>("json")
                     server?.updateSnapshot(lastJson ?: "")
+                    val active = runCatching {
+                        val status = JSONObject(lastJson ?: "{}").optString("status")
+                        status == "active" || status == "paused" || status == "parked"
+                    }.getOrDefault(false)
+                    if (!isWatch() && active && !workoutServiceActive) {
+                        requestNotificationPermission()
+                        workoutServiceActive = activity?.applicationContext?.let {
+                            WearWorkoutService.start(it)
+                        } == true
+                    } else if (!isWatch() && !active && workoutServiceActive) {
+                        activity?.applicationContext?.let { WearWorkoutService.stop(it) }
+                        workoutServiceActive = false
+                    }
                     result.success(null)
                 }
                 "requestPermissions" -> {
@@ -91,13 +105,15 @@ object WearLinkBridge {
 
     fun detach(activity: Activity) {
         if (this.activity !== activity) return
-        server?.stop()
-        server = null
+        if (!workoutServiceActive) {
+            server?.stop()
+            server = null
+            lastJson = null
+        }
         if (!workoutServiceActive) {
             client?.shutdown()
             client = null
         }
-        lastJson = null
         pendingResult = null
         pendingAction = null
         channel?.setMethodCallHandler(null)
@@ -163,6 +179,17 @@ object WearLinkBridge {
         try {
             current.requestPermissions(missing, REQUEST)
         } catch (_: Exception) {
+        }
+    }
+
+    private fun requestNotificationPermission() {
+        val current = activity ?: return
+        if (Build.VERSION.SDK_INT < 33 ||
+            current.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) ==
+                PackageManager.PERMISSION_GRANTED
+        ) return
+        runCatching {
+            current.requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), NOTIFICATION_REQUEST)
         }
     }
 
@@ -259,6 +286,10 @@ object WearLinkBridge {
     private fun stopServer(): Map<String, Any?> {
         prefs()?.serverEnabled = false
         server?.stop()
+        if (!isWatch() && workoutServiceActive) {
+            activity?.applicationContext?.let { WearWorkoutService.stop(it) }
+            workoutServiceActive = false
+        }
         return serverStatus()
     }
 
@@ -367,7 +398,9 @@ object WearLinkBridge {
         val created = WearGattClient(
             context = appContext,
             prefs = store,
-            onEvent = { event -> channel?.invokeMethod("clientEvent", event) },
+            onEvent = { event ->
+                channel?.invokeMethod("clientEvent", event)
+            },
             onState = { state ->
                 val status = state["status"] as? String
                 val active = status == "active" || status == "paused" || status == "parked"

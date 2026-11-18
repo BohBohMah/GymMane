@@ -22,8 +22,7 @@ class WearSnapshotBuilder {
   String workoutId() {
     final session = api.session;
     if (session == null) return '';
-    final at = session.loggedAt;
-    return at == null ? 'live' : at.millisecondsSinceEpoch.toString();
+    return session.sessionId;
   }
 
   Map<String, dynamic> build({required int rev, required String bootId}) {
@@ -31,6 +30,7 @@ class WearSnapshotBuilder {
     final now = DateTime.now();
     final semantic = _semantic(session);
     return {
+      'snapshotVersion': 1,
       'rev': rev,
       'bootId': bootId,
       'elapsedSec': api.elapsedSeconds,
@@ -49,6 +49,7 @@ class WearSnapshotBuilder {
     'currentIndex': session?.currentIndex ?? 0,
     'paused': api.paused,
     'effortMode': api.effortMode,
+    'restDefaults': api.restDefaults,
     'rest': _rest(session),
     'summary': _summary(session),
     'exercises': _exercises(session),
@@ -93,30 +94,38 @@ class WearSnapshotBuilder {
   List<Map<String, dynamic>> _exercises(WorkoutSession? session) {
     if (session == null) return const [];
     return [
-      for (final exercise in session.exercises)
+      for (var exerciseIndex = 0; exerciseIndex < session.exercises.length; exerciseIndex++)
         {
-          'id': exercise.id,
-          'name': exercise.name,
-          'primary': exercise.primary,
-          'linkedNext': exercise.linkedNext,
+          'id': session.exercises[exerciseIndex].id,
+          'name': session.exercises[exerciseIndex].name,
+          'primary': session.exercises[exerciseIndex].primary,
+          'linkedNext': session.exercises[exerciseIndex].linkedNext,
           'sets': [
-            for (var index = 0; index < exercise.sets.length; index++) _set(index, exercise.sets[index]),
+            for (var index = 0; index < session.exercises[exerciseIndex].sets.length; index++)
+              _set(exerciseIndex, session.exercises[exerciseIndex].sets[index], index),
           ],
         },
     ];
   }
 
-  Map<String, dynamic> _set(int index, SessionSet set) => {
-    'index': index,
-    'reps': set.reps,
-    if (set.repsR != null) 'repsRight': set.repsR,
-    'weight': set.weight,
-    'done': set.done,
-    if (set.half && !set.done) 'half': true,
-    'kind': set.kind.name,
-    if (set.rpe != null) 'rpe': set.rpe,
-    if (set.sec != null) 'sec': set.sec,
-    if (set.km != null) 'km': set.km,
-    if (set.note.isNotEmpty) 'note': set.note,
-  };
+  Map<String, dynamic> _set(int exerciseIndex, SessionSet set, int index) {
+    final restAfter = api.normalRestAfter(exerciseIndex, index);
+    return {
+      'index': index,
+      'setId': set.setId,
+      'reps': set.reps,
+      if (set.repsR != null) 'repsRight': set.repsR,
+      'weight': set.weight,
+      'done': set.done,
+      if (set.half && !set.done) 'half': true,
+      'kind': set.kind.name,
+      if (set.rpe != null) 'rpe': set.rpe,
+      if (set.sec != null) 'sec': set.sec,
+      if (set.km != null) 'km': set.km,
+      if (set.rest != null) 'restSec': set.rest,
+      if (restAfter > 0) 'restAfterSec': restAfter,
+      if (set.goal != null) 'goal': set.goal,
+      if (set.note.isNotEmpty) 'note': set.note,
+    };
+  }
 }

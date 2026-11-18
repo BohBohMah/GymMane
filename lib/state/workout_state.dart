@@ -1189,6 +1189,45 @@ mixin WorkoutState on FitCore, SettingsState, LibraryState, PlacesState, StatsSt
     s.restFrozen = null;
     s.restEndsAt = DateTime.now().add(Duration(seconds: seconds));
     RestAlarm.instance.schedule(Duration(seconds: seconds));
+    _startRestTicker();
+  }
+
+  /// Continues a rest that began on the watch while the phone was offline.
+  /// [endsAt] is the absolute deadline of the original rest, so replaying a
+  /// completion mid-rest keeps the remaining time instead of restarting it.
+  void adoptRest(DateTime endsAt, int totalSec) {
+    final s = session;
+    if (s == null) return;
+    RestAlarm.instance.stopSound();
+    final milliseconds = endsAt.difference(DateTime.now()).inMilliseconds;
+    final left = milliseconds <= 0 ? 0 : (milliseconds / 1000).ceil();
+    restTotal = totalSec > left ? totalSec : left;
+    if (sessionPaused) {
+      _restTimer?.cancel();
+      s.restEndsAt = null;
+      s.restFrozen = left <= 0 ? null : left;
+      _persist();
+      notifyListeners();
+      return;
+    }
+    if (left <= 0) {
+      _restTimer?.cancel();
+      RestAlarm.instance.cancel();
+      s.clearRest();
+      _persist();
+      notifyListeners();
+      return;
+    }
+    s.restFrozen = null;
+    s.restEndsAt = endsAt;
+    RestAlarm.instance.schedule(Duration(seconds: left));
+    _startRestTicker();
+    _persist();
+    notifyListeners();
+  }
+
+  void _startRestTicker() {
+    _restTimer?.cancel();
     _restTimer = Timer.periodic(const Duration(seconds: 1), (t) {
       final live = session;
       if (live == null || live.restEndsAt == null) {

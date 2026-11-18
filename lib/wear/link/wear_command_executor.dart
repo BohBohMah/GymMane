@@ -9,6 +9,11 @@ class WearCommandExecutor {
   final WearWorkoutApi api;
 
   WearExecution execute(WearCommand command, int currentRev) {
+    if (command.action != 'requestState' &&
+        command.workoutId != null &&
+        command.workoutId != api.session?.sessionId) {
+      return WearExecution.conflict;
+    }
     if (command.action != 'requestState' && command.baseRev != currentRev) {
       return WearExecution.conflict;
     }
@@ -17,6 +22,7 @@ class WearCommandExecutor {
       'completeSet' => _complete(command.args),
       'uncompleteSet' => _uncomplete(command.args),
       'updateSet' => _update(command.args),
+      'adjustSet' => _adjust(command.args),
       'nextExercise' => _simple(() => api.nextExercise(), needsSession: true),
       'prevExercise' => _simple(() => api.previousExercise(), needsSession: true),
       'goNextPending' => _simple(() => api.goNextPending(), needsSession: true),
@@ -43,8 +49,7 @@ class WearCommandExecutor {
   WearExecution _complete(Map<String, dynamic> args) {
     final session = api.session;
     if (session == null) return WearExecution.noSession;
-    final targetsExplicitly =
-        args.containsKey('exerciseIndex') || args.containsKey('setIndex');
+    final targetsExplicitly = args.containsKey('exerciseIndex') || args.containsKey('setIndex');
     final explicit = _indices(args);
     if (targetsExplicitly && explicit == null) return WearExecution.invalid;
     final (exerciseIndex, setIndex) = explicit ?? _currentPending(session) ?? (-1, -1);
@@ -52,7 +57,35 @@ class WearCommandExecutor {
     final set = session.exercises[exerciseIndex].sets[setIndex];
     if (set.done) return WearExecution.unchanged;
     api.toggleSet(exerciseIndex, setIndex);
+    _adoptReplayedRest(args);
+    final updated = api.session;
+    if (updated != null &&
+        exerciseIndex == updated.currentIndex &&
+        updated.exercises[exerciseIndex].sets.every((item) => item.done) &&
+        updated.exercises.any((exercise) => exercise.sets.any((item) => !item.done))) {
+      api.goNextPending();
+    }
     return WearExecution.changedOk;
+  }
+
+  /// A completion replayed after an offline period carries the deadline of the
+  /// rest that already started on the watch. Adopting it keeps both devices at
+  /// the same remaining time instead of restarting a full rest on the phone.
+  ///
+  /// The watch also sends the seconds it had left, which is immune to clock
+  /// skew between the two devices. The absolute deadline is only a fallback.
+  void _adoptReplayedRest(Map<String, dynamic> args) {
+    final total = (args['restTotalSec'] as num?)?.toInt() ?? 0;
+    final sentRemaining = (args['restRemainingSec'] as num?)?.toInt();
+    if (sentRemaining != null) {
+      final left = sentRemaining.clamp(0, 3600);
+      api.adoptRest(DateTime.now().add(Duration(seconds: left)), total > left ? total : left);
+      return;
+    }
+    final raw = args['restEndsAt'];
+    final endsAt = raw is String ? DateTime.tryParse(raw) : null;
+    if (endsAt == null) return;
+    api.adoptRest(endsAt, total);
   }
 
   WearExecution _uncomplete(Map<String, dynamic> args) {
@@ -120,6 +153,41 @@ class WearCommandExecutor {
     if (args.containsKey('km')) api.setKm(exerciseIndex, setIndex, km!);
     if (args.containsKey('rpe')) api.setRpe(exerciseIndex, setIndex, args['rpe'] == null ? null : rpe);
     if (kind != null) api.setKind(exerciseIndex, setIndex, kind);
+    return WearExecution.changedOk;
+  }
+
+  WearExecution _adjust(Map<String, dynamic> args) {
+    final session = api.session;
+    if (session == null) return WearExecution.noSession;
+    final indices = _indices(args);
+    if (indices == null) return WearExecution.invalid;
+    final (exerciseIndex, setIndex) = indices;
+    final set = session.exercises[exerciseIndex].sets[setIndex];
+    final field = args['field'];
+    final delta = args['delta'];
+    if (field is! String || delta is! num || !delta.isFinite) return WearExecution.invalid;
+    switch (field) {
+      case 'weight':
+        final value = (set.weight + delta).clamp(0, 1000);
+        api.setWeight(exerciseIndex, setIndex, value.toDouble());
+      case 'reps':
+        final value = (set.reps + delta).clamp(0, 999);
+        if (value != value.round()) return WearExecution.invalid;
+        api.setReps(exerciseIndex, setIndex, value.toInt());
+      case 'repsRight':
+        final value = ((set.repsR ?? set.reps) + delta).clamp(0, 999);
+        if (value != value.round()) return WearExecution.invalid;
+        api.setRepsRight(exerciseIndex, setIndex, value.toInt());
+      case 'sec':
+        final value = ((set.sec ?? 0) + delta).clamp(0, 86400);
+        if (value != value.round()) return WearExecution.invalid;
+        api.setSeconds(exerciseIndex, setIndex, value.toInt());
+      case 'km':
+        final value = ((set.km ?? 0) + delta).clamp(0, 1000);
+        api.setKm(exerciseIndex, setIndex, value.toDouble());
+      default:
+        return WearExecution.invalid;
+    }
     return WearExecution.changedOk;
   }
 
@@ -206,6 +274,10 @@ class WearCommandExecutor {
     if (exerciseIndex < 0 || exerciseIndex >= session.exercises.length) return null;
     final sets = session.exercises[exerciseIndex].sets;
     if (setIndex < 0 || setIndex >= sets.length) return null;
+    if (args.containsKey('exerciseId') && args['exerciseId'] != session.exercises[exerciseIndex].id) {
+      return null;
+    }
+    if (args.containsKey('setId') && args['setId'] != sets[setIndex].setId) return null;
     return (exerciseIndex, setIndex);
   }
 

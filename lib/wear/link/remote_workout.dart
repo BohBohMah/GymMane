@@ -6,6 +6,7 @@ enum RemoteStatus { idle, active, paused, parked, complete }
 class RemoteSet {
   const RemoteSet({
     required this.index,
+    required this.setId,
     required this.reps,
     required this.weight,
     required this.done,
@@ -16,9 +17,11 @@ class RemoteSet {
     this.sec,
     this.km,
     this.note = '',
+    this.restSeconds,
   });
 
   final int index;
+  final String setId;
   final int reps;
   final int? repsRight;
   final double weight;
@@ -29,6 +32,7 @@ class RemoteSet {
   final int? sec;
   final double? km;
   final String note;
+  final int? restSeconds;
 
   int get weakReps => repsRight == null || repsRight! > reps ? reps : repsRight!;
 }
@@ -187,6 +191,7 @@ class RemoteWorkout {
               for (final set in (raw['sets'] as List?) ?? const [])
                 RemoteSet(
                   index: ((set as Map)['index'] as num?)?.toInt() ?? 0,
+                  setId: set['setId'] as String? ?? '',
                   reps: (set['reps'] as num?)?.toInt() ?? 0,
                   repsRight: (set['repsRight'] as num?)?.toInt(),
                   weight: (set['weight'] as num?)?.toDouble() ?? 0,
@@ -197,6 +202,7 @@ class RemoteWorkout {
                   sec: (set['sec'] as num?)?.toInt(),
                   km: (set['km'] as num?)?.toDouble(),
                   note: set['note'] as String? ?? '',
+                  restSeconds: (set['restSec'] as num?)?.toInt(),
                 ),
             ],
           ),

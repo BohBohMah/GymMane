@@ -12,6 +12,7 @@ class Store {
 
   static const _key = 'gymmane_v1';
   SharedPreferences? _prefs;
+  Future<void> _saveTail = Future.value();
 
   Future<void> init() async {
     _prefs ??= await SharedPreferences.getInstance();
@@ -44,19 +45,31 @@ class Store {
 
   Future<void> save(Map<String, dynamic> data, {Map<String, String> raw = const {}}) async {
     try {
-      var text = encode(data);
-      for (final e in raw.entries) {
-        text = text.replaceFirst(jsonEncode(rawMark(e.key)), e.value);
-      }
+      await saveChecked(data, raw: raw);
+    } catch (e) {
+      debugPrint('Store.save failed: $e');
+    }
+  }
+
+  /// Encodes immediately, then serializes all writes to prevent an older
+  /// asynchronous save from overwriting a newer state.
+  Future<void> saveChecked(Map<String, dynamic> data, {Map<String, String> raw = const {}}) {
+    var text = encode(data);
+    for (final e in raw.entries) {
+      text = text.replaceFirst(jsonEncode(rawMark(e.key)), e.value);
+    }
+    final next = _saveTail.then((_) async {
       final link = ServerLink.instance;
       if (link.available) {
         link.push(text);
         return;
       }
-      await _prefs?.setString(_key, text);
-    } catch (e) {
-      debugPrint('Store.save failed: $e');
-    }
+      final prefs = _prefs;
+      if (prefs == null) throw StateError('Store not initialized');
+      if (!await prefs.setString(_key, text)) throw StateError('Store write failed');
+    });
+    _saveTail = next.then<void>((_) {}, onError: (Object error, StackTrace stack) {});
+    return next;
   }
 
   static String rawMark(String tag) => '\u0000$tag\u0000';

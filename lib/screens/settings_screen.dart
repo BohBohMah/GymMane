@@ -2735,7 +2735,7 @@ class _SettingsHomeState extends State<_SettingsHome> {
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
                             for (final (g, label) in [
-                              (const {'general', 'training', 'alerts'}, t.settingsGroupApp),
+                              (const {'general', 'training', 'alerts', 'wear'}, t.settingsGroupApp),
                               (const {'home', 'widgets', 'beta'}, t.settingsGroupHome),
                               (const {'data', 'support', 'about'}, t.settingsGroupData),
                             ]) ...[

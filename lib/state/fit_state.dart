@@ -113,6 +113,11 @@ class FitState extends FitCore
 
   void loadFromStore() {
     final data = withMergedExercises(Store.instance.load());
+    wearAppliedOperations
+      ..clear()
+      ..addAll(((data['wearAppliedOperations'] as Map?) ?? const {}).map(
+        (key, value) => MapEntry(key.toString(), value.toString()),
+      ));
     _loading = true;
     if (data['language'] == null) _adoptDeviceLanguage();
     if (data.isNotEmpty) {
@@ -558,6 +563,7 @@ class FitState extends FitCore
 
   @override
   Map<String, dynamic> toJson() => {
+        if (wearAppliedOperations.isNotEmpty) 'wearAppliedOperations': Map.of(wearAppliedOperations),
         'profile': profile.toJson(),
         'dark': dark,
         'theme': themePref,

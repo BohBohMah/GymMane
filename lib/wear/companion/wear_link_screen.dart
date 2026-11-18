@@ -16,8 +16,8 @@ import '../link/wear_link_client.dart';
 import '../link/wear_link_status.dart';
 import '../wear_shell.dart';
 
-/// Watch-side companion screen. It mirrors the phone workout and never marks a
-/// set as saved before the phone ack arrives.
+/// Watch-side companion screen. The current workout remains usable from the
+/// durable watch journal while the phone is temporarily unavailable.
 class WearLinkScreen extends StatefulWidget {
   const WearLinkScreen({super.key});
 
@@ -25,7 +25,7 @@ class WearLinkScreen extends StatefulWidget {
   State<WearLinkScreen> createState() => _WearLinkScreenState();
 }
 
-class _WearLinkScreenState extends State<WearLinkScreen> {
+class _WearLinkScreenState extends State<WearLinkScreen> with WidgetsBindingObserver {
   final WearLinkClient _client = WearLinkClient.instance;
   String _pin = '';
 
@@ -36,20 +36,25 @@ class _WearLinkScreenState extends State<WearLinkScreen> {
   String? _acting;
   String? _flash;
   bool _flashOk = true;
+  bool _confirmFinish = false;
   int _lastRest = 0;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _client.attach();
     _client.status.addListener(_onValue);
     _client.workout.addListener(_onValue);
     _client.pinPrompt.addListener(_onValue);
+    _client.finishing.addListener(_onValue);
     _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted) return;
       final rest = _client.workout.value?.rest;
       final left = rest?.remaining().inSeconds ?? 0;
-      if (rest != null && left <= 0 && _lastRest > 0) HapticFeedback.heavyImpact();
+      if (rest != null && left <= 0 && _lastRest > 0 && !_client.finishing.value) {
+        HapticFeedback.heavyImpact();
+      }
       _lastRest = left;
       setState(() {});
     });
@@ -60,16 +65,27 @@ class _WearLinkScreenState extends State<WearLinkScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _client.status.removeListener(_onValue);
     _client.workout.removeListener(_onValue);
     _client.pinPrompt.removeListener(_onValue);
+    _client.finishing.removeListener(_onValue);
     _ticker?.cancel();
     _flashTimer?.cancel();
     super.dispose();
   }
 
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_client.resume());
+    }
+  }
+
   void _onValue() {
-    if (mounted) setState(() {});
+    if (!mounted) return;
+    if (_client.workout.value?.hasWorkout != true) _confirmFinish = false;
+    setState(() {});
   }
 
   void _showFlash(String text, bool ok) {
@@ -92,11 +108,26 @@ class _WearLinkScreenState extends State<WearLinkScreen> {
     setState(() => _acting = null);
     if (ack.ok) {
       if (confirm) HapticFeedback.lightImpact();
-      if (confirm) _showFlash(t.wearLinkSaved, true);
+      if (confirm) {
+        _showFlash(
+          ack.code == 'queued'
+              ? (_client.status.value.connected ? t.wearLinkWaiting : t.wearLinkOffline)
+              : t.wearLinkSaved,
+          true,
+        );
+      }
     } else {
       HapticFeedback.heavyImpact();
       _showFlash(_ackMessage(ack), false);
     }
+  }
+
+  Future<void> _queueEdit(Future<WearAck> Function() action) async {
+    HapticFeedback.selectionClick();
+    final ack = await action();
+    if (!mounted || ack.ok) return;
+    HapticFeedback.heavyImpact();
+    _showFlash(_ackMessage(ack), false);
   }
 
   String _ackMessage(WearAck ack) => switch (ack.code) {
@@ -104,8 +135,42 @@ class _WearLinkScreenState extends State<WearLinkScreen> {
     'offline' || 'timeout' => t.wearLinkOffline,
     'no_session' => t.wearLinkNoWorkout,
     'no_pending' => t.wearLinkNoWorkout,
+    'finishing' => t.wearLinkWaiting,
     _ => '${t.wearLinkNotSaved} (${ack.code})',
   };
+
+  Future<void> _finishWorkout() async {
+    if (_acting != null) return;
+    setState(() {
+      _confirmFinish = false;
+      _acting = 'finish';
+    });
+    final ack = await _client.finishAndDiscard();
+    if (!mounted) return;
+    setState(() => _acting = null);
+    if (ack.ok) {
+      HapticFeedback.lightImpact();
+      _showFlash(_client.status.value.connected ? t.wearLinkWaiting : t.wearLinkOffline, true);
+    } else {
+      HapticFeedback.heavyImpact();
+      _showFlash(_ackMessage(ack), false);
+    }
+  }
+
+  Future<void> _completeWorkout() async {
+    if (_acting != null) return;
+    setState(() => _acting = 'finish');
+    final ack = await _client.finishAndSave();
+    if (!mounted) return;
+    setState(() => _acting = null);
+    if (ack.ok) {
+      HapticFeedback.lightImpact();
+      fit.popRoute(fallback: 'home');
+    } else {
+      HapticFeedback.heavyImpact();
+      _showFlash(_ackMessage(ack), false);
+    }
+  }
 
   Future<void> _loadDevices() async {
     if (_loadingDevices) return;
@@ -146,7 +211,9 @@ class _WearLinkScreenState extends State<WearLinkScreen> {
       return WearPage(children: [Text(t.wearLinkUnsupported, textAlign: TextAlign.center)]);
     }
     if (_client.pinPrompt.value != null) return _pinPage(gc, status);
-    if (!status.enabled || !status.connected) return _linkPage(gc, status);
+    if ((!status.enabled || !status.connected) && !(_client.workout.value?.hasWorkout ?? false)) {
+      return _linkPage(gc, status);
+    }
     return _workoutPage(gc, status, _client.workout.value);
   }
 
@@ -171,32 +238,19 @@ class _WearLinkScreenState extends State<WearLinkScreen> {
       WearLinkState.connecting || WearLinkState.pairing => gc.accent,
       _ => gc.textTertiary,
     };
-    final name = status.deviceName.isNotEmpty ? status.deviceName : status.address;
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
+        Text(
+          'GymMane',
+          style: AppTheme.f(11.5, weight: FontWeight.w700, color: gc.textSecondary),
+        ),
+        const SizedBox(width: 6),
         Container(
           width: 7,
           height: 7,
           decoration: BoxDecoration(color: color, shape: BoxShape.circle),
         ),
-        const SizedBox(width: 5),
-        Flexible(
-          child: Text(
-            name.isEmpty ? t.wearLinkOffline : name,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: AppTheme.f(11.5, weight: FontWeight.w600, color: gc.textSecondary),
-          ),
-        ),
-        if (_acting != null) ...[
-          const SizedBox(width: 6),
-          SizedBox(
-            width: 10,
-            height: 10,
-            child: CircularProgressIndicator(strokeWidth: 1.6, color: gc.textTertiary),
-          ),
-        ],
       ],
     );
   }
@@ -263,14 +317,6 @@ class _WearLinkScreenState extends State<WearLinkScreen> {
             label: t.wearLinkRefresh,
             icon: PhosphorIconsRegular.arrowsClockwise,
             onTap: _loadDevices,
-          ),
-        ],
-        if (status.enabled) ...[
-          const SizedBox(height: 8),
-          WearButton(
-            label: t.wearLinkDisconnect,
-            icon: PhosphorIconsRegular.plugs,
-            onTap: () => _client.disconnect(),
           ),
         ],
         if (status.address.isNotEmpty) ...[
@@ -368,6 +414,8 @@ class _WearLinkScreenState extends State<WearLinkScreen> {
   }
 
   Widget _workoutPage(GymColors gc, WearLinkStatus status, RemoteWorkout? workout) {
+    if (_client.finishing.value) return _finishingPage(gc, status, workout);
+    if (_confirmFinish) return _discardConfirmPage(gc);
     if (workout == null || !workout.hasWorkout) {
       return WearPage(
         children: [
@@ -510,14 +558,22 @@ class _WearLinkScreenState extends State<WearLinkScreen> {
                   )
                 : null,
           ),
+          const SizedBox(height: 6),
+          WearButton(
+            label: t.finishSession,
+            icon: PhosphorIconsBold.flagCheckered,
+            filled: true,
+            onTap: _acting == null ? _completeWorkout : null,
+          ),
+          const SizedBox(height: 6),
+          WearButton(
+            label: t.discard,
+            icon: PhosphorIconsRegular.trash,
+            color: gc.danger,
+            onTap: _acting == null ? () => setState(() => _confirmFinish = true) : null,
+          ),
         ],
         _flashLine,
-        const SizedBox(height: 8),
-        WearButton(
-          label: t.wearLinkDisconnect,
-          icon: PhosphorIconsRegular.plugs,
-          onTap: () => _client.disconnect(),
-        ),
         const SizedBox(height: 6),
         _backButton(),
       ],
@@ -529,6 +585,76 @@ class _WearLinkScreenState extends State<WearLinkScreen> {
     icon: PhosphorIconsBold.caretLeft,
     onTap: () => fit.popRoute(fallback: 'home'),
   );
+
+  Widget _discardConfirmPage(GymColors gc) {
+    return WearPage(
+      children: [
+        Icon(PhosphorIconsBold.warningCircle, size: 30, color: gc.danger),
+        const SizedBox(height: 8),
+        Text(
+          t.discardTitle,
+          textAlign: TextAlign.center,
+          style: AppTheme.f(15, weight: FontWeight.w800, color: gc.text, height: 1.15),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          t.discardBody,
+          textAlign: TextAlign.center,
+          style: AppTheme.f(11.5, weight: FontWeight.w500, color: gc.textSecondary),
+        ),
+        const SizedBox(height: 10),
+        WearButton(
+          label: t.discard,
+          icon: PhosphorIconsRegular.trash,
+          filled: true,
+          color: gc.danger,
+          onTap: _acting == null ? _finishWorkout : null,
+        ),
+        const SizedBox(height: 6),
+        WearButton(
+          label: t.cancelCaps,
+          onTap: _acting == null ? () => setState(() => _confirmFinish = false) : null,
+        ),
+      ],
+    );
+  }
+
+  Widget _finishingPage(GymColors gc, WearLinkStatus status, RemoteWorkout? workout) {
+    final connected = status.connected;
+    return WearPage(
+      children: [
+        Center(child: _statusDot(gc, status)),
+        const SizedBox(height: 10),
+        Icon(PhosphorIconsBold.flagCheckered, size: 28, color: gc.brass),
+        const SizedBox(height: 8),
+        Text(
+          t.finishSession,
+          textAlign: TextAlign.center,
+          style: AppTheme.f(14, weight: FontWeight.w800, color: gc.text),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          connected ? t.wearLinkWaiting : t.wearLinkOffline,
+          textAlign: TextAlign.center,
+          style: AppTheme.f(11.5, weight: FontWeight.w600, color: gc.textSecondary),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          '${workout?.doneSets ?? 0}/${workout?.totalSets ?? 0}',
+          style: AppTheme.f(10.5, weight: FontWeight.w600, color: gc.textTertiary),
+        ),
+        _flashLine,
+        const SizedBox(height: 8),
+        WearButton(
+          label: t.wearLinkRefresh,
+          icon: PhosphorIconsRegular.arrowsClockwise,
+          onTap: connected ? () => _client.requestState() : null,
+        ),
+        const SizedBox(height: 6),
+        _backButton(),
+      ],
+    );
+  }
 
   Widget _restCard(GymColors gc, RemoteRest rest, Duration left) {
     return Container(
@@ -655,22 +781,16 @@ class _WearLinkScreenState extends State<WearLinkScreen> {
           gc,
           fit.distanceUnitFor(exerciseId).toUpperCase(),
           fit.distanceValueFor(exerciseId, set.km!),
-          () => _run('km', () => _client.updateSet(exIndex, pending, km: (set.km! - 0.1).clamp(0.0, 1000.0))),
-          () => _run('km', () => _client.updateSet(exIndex, pending, km: (set.km! + 0.1).clamp(0.0, 1000.0))),
+          () => _queueEdit(() => _client.adjustSet(exIndex, pending, field: 'km', delta: -0.1)),
+          () => _queueEdit(() => _client.adjustSet(exIndex, pending, field: 'km', delta: 0.1)),
         ),
         const SizedBox(height: 6),
         _stepper(
           gc,
           t.timeCol,
           clockLabel(set.sec ?? 0),
-          () => _run(
-            'sec',
-            () => _client.updateSet(exIndex, pending, sec: ((set.sec ?? 0) - 60).clamp(0, 86400)),
-          ),
-          () => _run(
-            'sec',
-            () => _client.updateSet(exIndex, pending, sec: ((set.sec ?? 0) + 60).clamp(0, 86400)),
-          ),
+          () => _queueEdit(() => _client.adjustSet(exIndex, pending, field: 'sec', delta: -60)),
+          () => _queueEdit(() => _client.adjustSet(exIndex, pending, field: 'sec', delta: 60)),
         ),
       ];
     }
@@ -680,8 +800,8 @@ class _WearLinkScreenState extends State<WearLinkScreen> {
           gc,
           t.timeCol,
           clockLabel(set.sec!),
-          () => _run('sec', () => _client.updateSet(exIndex, pending, sec: (set.sec! - 15).clamp(0, 86400))),
-          () => _run('sec', () => _client.updateSet(exIndex, pending, sec: (set.sec! + 15).clamp(0, 86400))),
+          () => _queueEdit(() => _client.adjustSet(exIndex, pending, field: 'sec', delta: -15)),
+          () => _queueEdit(() => _client.adjustSet(exIndex, pending, field: 'sec', delta: 15)),
         ),
       ];
     }
@@ -691,22 +811,16 @@ class _WearLinkScreenState extends State<WearLinkScreen> {
         gc,
         t.repsCol,
         '${set.reps}',
-        () => _run('reps', () => _client.updateSet(exIndex, pending, reps: (set.reps - 1).clamp(0, 999))),
-        () => _run('reps', () => _client.updateSet(exIndex, pending, reps: (set.reps + 1).clamp(0, 999))),
+        () => _queueEdit(() => _client.adjustSet(exIndex, pending, field: 'reps', delta: -1)),
+        () => _queueEdit(() => _client.adjustSet(exIndex, pending, field: 'reps', delta: 1)),
       ),
       const SizedBox(height: 6),
       _stepper(
         gc,
         fit.units.toUpperCase(),
         fit.weightValue(set.weight),
-        () => _run(
-          'weight',
-          () => _client.updateSet(exIndex, pending, weight: _roundKg((set.weight - step).clamp(0.0, 1000.0))),
-        ),
-        () => _run(
-          'weight',
-          () => _client.updateSet(exIndex, pending, weight: _roundKg((set.weight + step).clamp(0.0, 1000.0))),
-        ),
+        () => _queueEdit(() => _client.adjustSet(exIndex, pending, field: 'weight', delta: -step)),
+        () => _queueEdit(() => _client.adjustSet(exIndex, pending, field: 'weight', delta: step)),
       ),
     ];
   }
@@ -729,18 +843,14 @@ class _WearLinkScreenState extends State<WearLinkScreen> {
               Expanded(
                 child: GestureDetector(
                   behavior: HitTestBehavior.opaque,
-                  onTap: _acting == null
-                      ? () => _run(
-                          'rpe',
-                          () => _client.updateSet(
-                            exIndex,
-                            pending,
-                            rpe: (rir ? 10 - value : value).toDouble(),
-                            clearRpe: set.rpe == (rir ? 10 - value : value).toDouble(),
-                          ),
-                          confirm: false,
-                        )
-                      : null,
+                  onTap: () => _queueEdit(
+                    () => _client.updateSet(
+                      exIndex,
+                      pending,
+                      rpe: (rir ? 10 - value : value).toDouble(),
+                      clearRpe: set.rpe == (rir ? 10 - value : value).toDouble(),
+                    ),
+                  ),
                   child: Container(
                     height: 32,
                     alignment: Alignment.center,
@@ -795,13 +905,13 @@ class _WearLinkScreenState extends State<WearLinkScreen> {
       label: label,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
-        onTap: _acting == null ? onTap : null,
+        onTap: onTap,
         child: Container(
           width: 42,
           height: 42,
           alignment: Alignment.center,
           decoration: BoxDecoration(color: gc.bgRaised2, borderRadius: BorderRadius.circular(16)),
-          child: Icon(icon, size: 16, color: _acting == null ? gc.text : gc.textTertiary),
+          child: Icon(icon, size: 16, color: gc.text),
         ),
       ),
     );
@@ -825,6 +935,4 @@ class _WearLinkScreenState extends State<WearLinkScreen> {
       ),
     );
   }
-
-  double _roundKg(double value) => (value * 100).round() / 100;
 }

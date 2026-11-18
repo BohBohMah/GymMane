@@ -21,7 +21,9 @@ class WearRotary {
   WearRotary._();
 
   static const _channel = MethodChannel('gymmane/rotary');
+  static const _sensitivity = 0.35;
   static final List<ScrollController> _stack = [];
+  static final Map<ScrollController, double> _targets = {};
   static VoidCallback? onTurn;
 
   static void init() {
@@ -36,12 +38,21 @@ class WearRotary {
     final c = _stack.isEmpty ? null : _stack.last;
     if (c == null || !c.hasClients) return;
     final p = c.position;
-    c.jumpTo((p.pixels + delta).clamp(p.minScrollExtent, p.maxScrollExtent));
+    final current = _targets[c] ?? p.pixels;
+    final target = (current + delta * _sensitivity).clamp(p.minScrollExtent, p.maxScrollExtent).toDouble();
+    _targets[c] = target;
+    unawaited(c.animateTo(target, duration: const Duration(milliseconds: 140), curve: Curves.easeOutCubic));
   }
 
-  static void attach(ScrollController c) => _stack.add(c);
+  static void attach(ScrollController c) {
+    _stack.add(c);
+    _targets[c] = c.hasClients ? c.position.pixels : 0;
+  }
 
-  static void detach(ScrollController c) => _stack.remove(c);
+  static void detach(ScrollController c) {
+    _stack.remove(c);
+    _targets.remove(c);
+  }
 }
 
 String _cap(String s) {

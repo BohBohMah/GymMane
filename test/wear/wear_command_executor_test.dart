@@ -103,6 +103,23 @@ class FakeWearApi implements WearWorkoutApi {
   void setWeight(int exercise, int set, double kg) => _set(exercise, set, (value) => value.weight = kg);
 
   @override
+  int normalRestAfter(int exercise, int set) => restAfter;
+
+  @override
+  Map<String, int> get restDefaults => const {'normal': 90, 'mini': 20, 'change': 0, 'side': 0};
+
+  @override
+  void adoptRest(DateTime endsAt, int totalSec) {
+    adoptedRestEndsAt = endsAt;
+    adoptedRestTotal = totalSec;
+    session!.restEndsAt = endsAt;
+  }
+
+  int restAfter = 90;
+  DateTime? adoptedRestEndsAt;
+  int? adoptedRestTotal;
+
+  @override
   void skipRest() {
     session!.restEndsAt = null;
     session!.restFrozen = null;
@@ -135,6 +152,21 @@ WearCommand command(String action, {int baseRev = 0, Map<String, dynamic> args =
     WearCommand(id: 'cmd-1', baseRev: baseRev, action: action, args: args);
 
 void main() {
+  test('session identities survive persistence and differ for new workouts', () {
+    final first = apiWithSession().session!;
+    final second = apiWithSession().session!;
+    expect(first.sessionId, isNot(second.sessionId));
+    final restored = WorkoutSession.fromJson(first.toJson());
+    expect(restored.sessionId, first.sessionId);
+    expect(WearSnapshotBuilder(FakeWearApi()..session = restored).workoutId(), first.sessionId);
+    final legacy = first.toJson()..remove('sid');
+    final migrated = WorkoutSession.fromJson(legacy);
+    expect(migrated.sessionId, isNotEmpty);
+    expect(WorkoutSession.fromJson(migrated.toJson()).sessionId, migrated.sessionId);
+    expect(restored.exercises.first.sets.first.setId, first.exercises.first.sets.first.setId);
+    expect(first.exercises.first.sets.first.copy().setId, isNot(first.exercises.first.sets.first.setId));
+  });
+
   group('WearCommand', () {
     test('rejects missing or oversized ids', () {
       expect(WearCommand.fromJson(const {'action': 'pause'}), isNull);
@@ -172,12 +204,56 @@ void main() {
   });
 
   group('WearCommandExecutor', () {
+    test('rejects command targeting a different workout even at current revision', () {
+      final api = apiWithSession();
+      final action = WearCommand(
+        id: 'stale',
+        baseRev: 0,
+        action: 'completeSet',
+        workoutId: 'different-session',
+        args: const {'exerciseIndex': 0, 'setIndex': 0},
+      );
+      expect(WearCommandExecutor(api).execute(action, 0).code, 'conflict');
+      expect(api.session!.exercises[0].sets[0].done, isFalse);
+    });
+
+    test('rejects an index that now points at a different set', () {
+      final api = apiWithSession();
+      final original = api.session!.exercises[0].sets.first;
+      api.session!.exercises[0].sets.insert(0, SessionSet(10, 10, false));
+      final action = WearCommand(
+        id: 'moved',
+        baseRev: 0,
+        action: 'completeSet',
+        workoutId: api.session!.sessionId,
+        args: {
+          'exerciseIndex': 0,
+          'exerciseId': api.session!.exercises[0].id,
+          'setIndex': 0,
+          'setId': original.setId,
+        },
+      );
+      expect(WearCommandExecutor(api).execute(action, 0).ok, isFalse);
+      expect(api.session!.exercises[0].sets.first.done, isFalse);
+    });
+
     test('completes the current pending set', () {
       final api = apiWithSession();
       final result = WearCommandExecutor(api).execute(command('completeSet'), 0);
       expect(result.ok, isTrue);
       expect(result.changed, isTrue);
       expect(api.session!.exercises[0].sets[0].done, isTrue);
+    });
+
+    test('moves to the next exercise after completing the last local set', () {
+      final api = apiWithSession();
+      api.session!.exercises[0].sets[0].done = true;
+      final result = WearCommandExecutor(api).execute(
+        command('completeSet', args: const {'exerciseIndex': 0, 'setIndex': 1}),
+        0,
+      );
+      expect(result.ok, isTrue);
+      expect(api.session!.currentIndex, 1);
     });
 
     test('completing an already done set changes nothing', () {
@@ -188,6 +264,70 @@ void main() {
       expect(result.ok, isTrue);
       expect(result.changed, isFalse);
       expect(api.session!.exercises[1].sets[0].done, isTrue);
+    });
+
+    test('adopts the rest deadline of a completion replayed from the watch', () {
+      final api = apiWithSession();
+      final endsAt = DateTime.now().add(const Duration(seconds: 30));
+      final result = WearCommandExecutor(api).execute(
+        command(
+          'completeSet',
+          args: {
+            'exerciseIndex': 0,
+            'setIndex': 0,
+            'restEndsAt': endsAt.toIso8601String(),
+            'restTotalSec': 120,
+          },
+        ),
+        0,
+      );
+      expect(result.ok, isTrue);
+      expect(api.adoptedRestEndsAt, endsAt);
+      expect(api.adoptedRestTotal, 120);
+      expect(api.session!.exercises[0].sets[0].done, isTrue);
+    });
+
+    test('prefers the remaining seconds sent by the watch over the deadline', () {
+      final api = apiWithSession();
+      // A skewed deadline that would be far in the past must not win.
+      final before = DateTime.now();
+      final result = WearCommandExecutor(api).execute(
+        command(
+          'completeSet',
+          args: {
+            'exerciseIndex': 0,
+            'setIndex': 0,
+            'restEndsAt': DateTime(2020).toIso8601String(),
+            'restTotalSec': 120,
+            'restRemainingSec': 30,
+          },
+        ),
+        0,
+      );
+      expect(result.ok, isTrue);
+      final endsAt = api.adoptedRestEndsAt!;
+      expect(endsAt.difference(before).inSeconds, inInclusiveRange(29, 31));
+      expect(api.adoptedRestTotal, 120);
+    });
+
+    test('an elapsed replayed rest is not restarted', () {
+      final api = apiWithSession();
+      final result = WearCommandExecutor(api).execute(
+        command(
+          'completeSet',
+          args: {
+            'exerciseIndex': 0,
+            'setIndex': 0,
+            'restEndsAt': DateTime.now().subtract(const Duration(minutes: 1)).toIso8601String(),
+            'restTotalSec': 120,
+            'restRemainingSec': 0,
+          },
+        ),
+        0,
+      );
+      expect(result.ok, isTrue);
+      expect(api.adoptedRestEndsAt!.isAfter(DateTime.now()), isFalse);
+      expect(api.adoptedRestTotal, 120);
     });
 
     test('stale base revision is a conflict', () {
@@ -226,6 +366,22 @@ void main() {
         0,
       );
       expect(badWeight.code, 'invalid');
+    });
+
+    test('applies queued relative adjustments in order', () {
+      final api = apiWithSession();
+      final executor = WearCommandExecutor(api);
+      for (var i = 0; i < 3; i++) {
+        final result = executor.execute(
+          command(
+            'adjustSet',
+            args: const {'exerciseIndex': 0, 'setIndex': 0, 'field': 'weight', 'delta': 2.5},
+          ),
+          0,
+        );
+        expect(result.ok, isTrue);
+      }
+      expect(api.session!.exercises[0].sets[0].weight, 67.5);
     });
 
     test('sets and clears RPE', () {
@@ -324,7 +480,7 @@ void main() {
       expect(json['rev'], 4);
       expect(json['bootId'], 'boot');
       expect(json['status'], 'active');
-      expect(json['workoutId'], '${session.loggedAt!.millisecondsSinceEpoch}');
+      expect(json['workoutId'], session.sessionId);
       expect((json['rest'] as Map)['totalSec'], 90);
       expect((json['rest'] as Map)['endsAt'], isNotNull);
       final exercises = json['exercises'] as List;
@@ -337,6 +493,8 @@ void main() {
       expect(second['rpe'], 9.0);
       expect(second['kind'], 'drop');
       expect(((exercises[1] as Map)['sets'] as List)[0]['note'], 'slow');
+      expect(json['restDefaults'], FakeWearApi().restDefaults);
+      expect((((first['sets'] as List)[0]) as Map)['restAfterSec'], 90);
     });
 
     test('reports idle without a session and paused with pause', () {

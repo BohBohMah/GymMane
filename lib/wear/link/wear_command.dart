@@ -1,12 +1,19 @@
 import 'dart:convert';
 
 class WearCommand {
-  const WearCommand({required this.id, required this.baseRev, required this.action, this.args = const {}});
+  const WearCommand({
+    required this.id,
+    required this.baseRev,
+    required this.action,
+    this.args = const {},
+    this.workoutId,
+  });
 
   final String id;
   final int baseRev;
   final String action;
   final Map<String, dynamic> args;
+  final String? workoutId;
 
   static WearCommand? fromJson(Map<String, dynamic> json) {
     final id = json['id'] as String?;
@@ -17,11 +24,18 @@ class WearCommand {
       id: id,
       baseRev: (json['baseRev'] as num?)?.toInt() ?? 0,
       action: action,
+      workoutId: json['workoutId'] is String ? json['workoutId'] as String : null,
       args: raw is Map ? raw.cast<String, dynamic>() : const {},
     );
   }
 
-  Map<String, dynamic> toJson() => {'id': id, 'baseRev': baseRev, 'action': action, 'args': args};
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'baseRev': baseRev,
+    'action': action,
+    'args': args,
+    if (workoutId != null) 'workoutId': workoutId,
+  };
 }
 
 class WearAck {
@@ -36,12 +50,12 @@ class WearAck {
   WearAck withRev(int next) => WearAck(id: id, ok: ok, rev: next, code: code, message: message);
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'ok': ok,
-        'rev': rev,
-        'code': code,
-        if (message != null) 'message': message,
-      };
+    'id': id,
+    'ok': ok,
+    'rev': rev,
+    'code': code,
+    if (message != null) 'message': message,
+  };
 
   String toJsonString() => jsonEncode(toJson());
 }

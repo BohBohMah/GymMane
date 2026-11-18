@@ -15,6 +15,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import com.gymmane.wear.protocol.Chunker
 import com.gymmane.wear.protocol.FrameKind
 import com.gymmane.wear.protocol.FrameReader
@@ -60,6 +61,7 @@ class WearGattClient(
     private var wantConnected = false
     private var retryAttempt = 0
     private var lastError = ""
+    private var connectStartedAt = 0L
 
     private val retry = Runnable { connect() }
 
@@ -76,6 +78,12 @@ class WearGattClient(
         wantConnected = true
         retryAttempt = 0
         lastError = ""
+        if (gatt != null && session == null && connectStartedAt > 0L &&
+            SystemClock.elapsedRealtime() - connectStartedAt >= CONNECTION_STALL_MS
+        ) {
+            WearLinkDiagnostics.log("watch replacing stalled GATT connection")
+            disconnect()
+        }
         connect()
         return statusMap()
     }
@@ -194,6 +202,7 @@ class WearGattClient(
         }
         lastError = ""
         emit()
+        connectStartedAt = SystemClock.elapsedRealtime()
         gatt = try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 device.connectGatt(app, false, callback, BluetoothDevice.TRANSPORT_LE)
@@ -221,6 +230,7 @@ class WearGattClient(
         sending = false
         discoverStarted = false
         indicationReady = false
+        connectStartedAt = 0L
         if (current != null) {
             runCatching { current.disconnect() }
             runCatching { current.close() }
@@ -429,6 +439,7 @@ class WearGattClient(
             }
             is WatchHandshakeResult.Ready -> {
                 session = result.session
+                connectStartedAt = 0L
                 sendHandshake(result.confirm)
                 lastError = ""
                 WearLinkDiagnostics.log("watch handshake ready; requesting state")
@@ -542,6 +553,7 @@ class WearGattClient(
     }
 
     companion object {
+        private const val CONNECTION_STALL_MS = 12_000L
         private val CCCD: UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
     }
 }

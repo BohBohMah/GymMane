@@ -1,5 +1,325 @@
 # GymMane Wear OS companion — handoff
 
+## Workout stop and watch finish/discard — 2026-11-17
+
+The owner reported that ending a workout on the phone left the watch running.
+The cause was the watch's idle-snapshot rule: when the phone had no workout, the
+watch ignored the snapshot whenever it still had queued edits, so the local
+session could never be stopped. The watch also had no way to finish a workout.
+
+Implemented:
+
+- A phone snapshot with `status: idle` / empty `workoutId` is authoritative and
+  clears the watch journal and workout even when edits are pending. A same-boot
+  idle snapshot with `rev` lower than the revision the watch already holds is
+  ignored as stale; a changed `bootId` is accepted (phone process restart).
+- `WearLinkClient.finishAndDiscard()` records a `saveExit` operation in the
+  journal after all pending edits, exposes `finishing`, and refuses further
+  commands with code `finishing`. The local workout is only cleared on a
+  positive ACK, a `no_session` ACK, or an authoritative idle snapshot. Any other
+  failure keeps the intent durable and retries on reconnect.
+- Watch UI: **FINISH SESSION** on the workout page, a confirmation page reusing
+  `discardTitle`/`discardBody`/`discard`/`cancelCaps`, and a waiting page
+  reusing `wearLinkWaiting`/`wearLinkOffline`.
+- `WearOfflineJournal` treats `saveExit` as a durable local terminal intent: it
+  is appended to the queue without erasing the snapshot, so the workout and the
+  finish survive a full app restart.
+- The phone executes `saveExit` through the existing executor, persists the
+  cleared live session before ACK, and pushes an idle snapshot. No new protocol
+  action was added.
+- A snapshot that changes workout identity (new workout or idle) releases any
+  in-flight command so its late or missing ACK cannot stall the next queue.
+- Reconnect no longer starts the pump before the fresh phone state arrives, so
+  the first replayed command uses the correct `baseRev`.
+- A late non-ok ACK after an idle snapshot now clears instead of rebasing the
+  journal over an idle snapshot (the journal requires a non-empty workout id).
+
+Tests: `test/wear/wear_link_client_test.dart` (idle clears pending edits, stale
+idle ignored, late rejected ACK harmless, offline finish stays durable,
+FIFO queue before discard, ACK/no_session clearing),
+`test/wear/wear_offline_journal_test.dart` (discard intent survives restart),
+`test/wear/wear_phone_persistence_test.dart` (watch discard removes the live
+session and the persisted `live` key). `flutter test test\wear\` reports **72
+tests passed** and `flutter analyze` is clean. No APK was installed and no
+production data, signing or Bluetooth bond was touched.
+
+## Delivery build of the offline-first test APKs — 2026-11-17
+
+Both isolated test APKs were built after the offline-first integration, the
+offline rest-timer fix and the stop/discard work, with the project's Flutter
+3.41.9 / Dart 3.11.5
+toolchain, Gradle 8.14 and Temurin 21. `flutter test test\wear\` reported
+**72 tests passed** immediately before the
+builds. **Nothing was installed**, no device was contacted and the production
+package `com.gymmane.app`, its data, its signing key and the Bluetooth bonds
+were not touched.
+
+| APK | Application ID | Size (bytes) | SHA-256 |
+| --- | --- | --- | --- |
+| `build\app\outputs\flutter-apk\GymMane-test-phone.apk` | `com.gymmane.test.phone` | 114,473,829 | `56D5613811895B7258401EE6F318A870E6FE1BBD2AF188423A6DF01C21C1858D` |
+| `build\app\outputs\flutter-apk\GymMane-test-watch.apk` | `com.gymmane.test.wear` | 68,787,393 | `28C07AE3DA838F3B2F24B17EE65F75FA95CFB9288377489C4E29DB1311BB8795` |
+
+Exact build commands (PowerShell, from the repository root):
+
+```powershell
+$env:JAVA_HOME='C:\Users\Claudio\.jdks\temurin-21.0.12.1'
+$env:GRADLE_OPTS='-Dorg.gradle.java.home=C:\Users\Claudio\.jdks\temurin-21.0.12.1'
+$FLUTTER='C:\Users\Claudio\AppData\Local\Temp\opencode\flutter-3.41\bin\flutter.bat'
+
+& $FLUTTER build apk --release -t lib\main.dart `
+  --android-project-arg=gymmaneTestVariant=phone `
+  --dart-define=GYMMANE_TEST_BUILD=true `
+  --dart-define=GYMMANE_WEAR_DIAGNOSTICS=true
+Copy-Item build\app\outputs\flutter-apk\app-release.apk `
+  build\app\outputs\flutter-apk\GymMane-test-phone.apk -Force
+
+& $FLUTTER build apk --release -t lib\main_wear_companion.dart `
+  --android-project-arg=gymmaneTestVariant=wear `
+  --dart-define=GYMMANE_TEST_BUILD=true `
+  --dart-define=GYMMANE_WEAR_DIAGNOSTICS=true
+Copy-Item build\app\outputs\flutter-apk\app-release.apk `
+  build\app\outputs\flutter-apk\GymMane-test-watch.apk -Force
+Remove-Item build\app\outputs\flutter-apk\app-release.apk
+```
+
+The last line removes the intermediate test-variant file so it cannot be
+mistaken for the production `app-release.apk`. `android\keystore.properties`
+does not exist in this working copy, so a production release APK must **not** be
+built here (it would silently fall back to the debug key); rebuild production
+only on a checkout that has the release keystore.
+
+Static verification performed on the two files:
+
+- `aapt dump badging`: phone `com.gymmane.test.phone`, minSdk 24, target 36;
+  watch `com.gymmane.test.wear`, minSdk 31, target 36, required
+  `android.hardware.type.watch` and `android.hardware.bluetooth_le`; labels
+  `GymMane Test Phone` / `GymMane Test Watch`. The watch APK is not debuggable.
+- `aapt dump permissions`: **0** occurrences of `INTERNET`,
+  `BLUETOOTH_SCAN`, `ACCESS_NETWORK_STATE`, or fine/coarse/background location
+  in either file. Phone keeps `BLUETOOTH_ADVERTISE` + `BLUETOOTH_CONNECT` (+
+  legacy `BLUETOOTH`/`BLUETOOTH_ADMIN`, maxSdk 30); watch keeps
+  `BLUETOOTH_CONNECT` + `VIBRATE` only.
+- `apksigner verify --print-certs`: both signed with the local debug
+  certificate SHA-256
+  `b731e5b0dfeee1046596c49dafdf0496300817dab65ad3db7acb225d8c259e52`, so
+  `adb install -r` can update existing test packages.
+- Both manifests declare `com.gymmane.app.wear.WearWorkoutService` with
+  `foregroundServiceType=0x10` (`connectedDevice`).
+- Binary inspection found the watch journal marker
+  `wear_workout_journal_v1.json` in the watch APK and both
+  `wear_workout_journal_v1.json` and `wearAppliedOperations` in the phone APK,
+  confirming the built payloads contain the offline-first code. The rest-sync
+  markers `restDefaults`, `adoptRest` and `restRemainingSec` are present in the
+  phone payload; the watch payload carries `restDefaults`, `restRemainingSec`,
+  `saveExit` and `finishing`, confirming the stop/discard code is in the final
+  pair.
+
+**What the build does not prove:** the 20-minute physical separation,
+screen-off/OEM battery behavior, a real reconnect halfway through a rest,
+replay against the real HONOR + Galaxy Watch4 pair, a phone-ended workout while
+disconnected, a watch finish+discard whose whole queue reaches the phone, and
+power-loss durability are still unverified on hardware. See
+`REAL_DEVICE_TEST.md`.
+
+## Offline rest timer and mid-rest reconnect (2026-11-17)
+
+Completing a set while the watch is disconnected now starts the rest locally
+with the same duration the phone would use: the per-set override, the mini
+rest before a rest-pause/cluster set, the change-exercise rest, the routine
+rest and the per-exercise/global default, in that order of precedence. Cardio
+sets and sessions paused on the phone do not start a rest, matching
+`WorkoutState.startRest` / `normalRestAfter`. The snapshot carries
+`restDefaults` and a computed `restAfterSec` on every set; the journal resolves
+the duration locally and stores the absolute `restEndsAt`/`restTotalSec` with
+the pending completion, so rebasing on a later phone snapshot cannot restart
+the rest.
+
+When the pending completion is finally replayed, the watch sends both the
+original deadline and `restRemainingSec`, computed at send time. The phone
+prefers the remaining seconds (immune to clock skew between the two devices)
+and uses the absolute deadline only as a fallback. `FitState.adoptRest` then
+keeps the original total but continues from the real remaining time, freezes
+the rest if the phone is paused, and clears it if it already expired. A
+1:30-elapsed/2:00 rest therefore shows about 0:30 on the phone, not a new 2:00.
+
+Covered by `test/wear/wear_offline_journal_test.dart` (offline rest, 90 s →
+30 s rebase, explicit/mini/change rest, paused) and
+`test/wear/wear_command_executor_test.dart` / `wear_link_client_test.dart`
+(deadline adoption, remaining-seconds preference, deadline sent on replay).
+`flutter analyze` is clean and `git diff --check` passes. Physical mid-rest
+reconnect is still required.
+
+## Phone command persistence continuation
+
+Phone commands now run serially in `WearLinkServer`; successful mutation and
+its operation-ID/signature record are written together into the ordinary
+`gymmane_v1` state before the ACK. `FitCore.applyWearTransaction` suppresses
+intermediate synchronous saves and `persistWearTransaction` requests a
+failure-reporting write; `Store.saveChecked` serializes ordinary and checked
+writes so older writes cannot overtake newer ones. A duplicate ID with a
+different payload is rejected, and a retry after a failed save retries the
+write without repeating the mutation. The record is restored in
+`FitState.loadFromStore`. There is currently no pruning strategy for records.
+The Android legacy shared-preferences plugin uses `commit`, but power-loss and
+filesystem behavior have not been physically validated. The web server-backed
+store has different acknowledgement semantics; the Wear server is Android-only.
+
+`test/wear/wear_phone_persistence_test.dart` exercises the real phone command
+executor and normal store, concurrent duplicate delivery, reload of the state,
+duplicate retry, and different-payload ID rejection. Two tests passed;
+51 Wear tests passed before the final addition and `flutter analyze` and
+`git diff --check` passed. No APK built or installed.
+
+**Still not an offline-first delivery:** the watch client continues clearing
+the workout on disconnect and does not use the journal, and the UI still
+awaits ACK. Replay, safe conflict preconditions, rest/side-switch/auto-advance
+semantics, stale snapshot handling, and end-to-end verification remain. The
+next action is to integrate the journal into `WearLinkClient`, retaining a
+validated snapshot and pending operations on disconnect/restart, while adding
+conflict-safe replay (including stable set IDs and original IDs) and matching
+phone workout/rest side effects before exposing disconnected editing. Audit
+the new phone transaction against asynchronous timer/alarm side effects and
+write-failure scenarios; the current tests do not prove atomic external side
+effects or process/power-loss behavior.
+
+## Latest checkpoint
+
+The journal's `apply` now requires the supplied nonempty `setId` to match
+the indexed set before an edit or completion; missing and stale IDs leave
+the journal unchanged. Seven journal tests passed. This does not connect the
+journal to production or implement reconciliation. Next: implement serialized,
+failure-reporting phone persistence with workout and deduplication in one
+committed state before ACK, then integrate client replay and UI. Preserve all
+existing changes; do not build delivery APKs until the end-to-end test passes.
+
+## Offline-first continuation checkpoint
+
+**The requested end-to-end offline workflow is not implemented.** No new APK
+was built or installed during this continuation. Do not present these changes
+as ready for physical use or enable offline UI/replay yet.
+
+Latest continuation added `WearOfflineJournalFile`, a single-owner private-file
+adapter using flush plus rename, and `WearOfflineJournal.apply` reducers for
+`updateSet`, `adjustSet`, `completeSet` and `goToExercise`. Updates and pending
+operations are persisted together before publication. A test performs three
+concurrent weight increments (20 → 27.5) against the serialized current state,
+and another recreates the journal from a real temporary file. Six journal
+tests, `flutter analyze` and `git diff --check` pass. The adapter does not fsync
+the directory, does not handle multiple processes/owners or prove crash safety
+on Android. Set targeting still uses index plus exercise ID, not stable set IDs.
+The `adjustSet` operation has no phone protocol handler and **must not be
+replayed**. No UI, transport, reconnection, durable phone ACK or conflict
+resolution integration has been made.
+
+Follow-up: live `SessionSet` objects now have persisted random `setId`s;
+duplicates receive new IDs, snapshots include them, and phone command index
+resolution validates optional exercise/set IDs to reject reordered targets.
+Legacy sets obtain IDs when loaded, which become stable after the session is
+saved. This changes session serialization and still needs full-suite and
+physical migration validation. The journal reducer currently does **not**
+require or check these set IDs: add that check and persist/replay them before
+connecting it to the UI or phone. 33 targeted journal/executor tests,
+`flutter analyze`, and `git diff --check` passed. No APK was built or installed.
+
+Added `lib/wear/link/wear_offline_journal.dart`: a serialized coordinator that
+persists a versioned envelope containing a snapshot and ordered pending
+operations through an injected atomic writer before publishing each change.
+It validates session IDs, operation IDs and sequence order, rejects duplicate
+pending IDs and out-of-order ACK removal, and restores from encoded state.
+`test/wear/wear_offline_journal_test.dart` covers recreation, write failure,
+duplicate IDs, out-of-order ACK and session mismatch. Four tests and
+`flutter analyze` pass. This coordinator is **not connected** to
+`WearSnapshotStore`, the watch UI, BLE, or the phone; no production durability
+guarantee follows from an injected callback. It does not yet validate complete
+operation payloads or persist a full phone-side deduplication ledger.
+
+Next exact implementation actions:
+
+1. Implement a single-owner atomic file/SQLite-backed journal adapter with
+   version migrations, full snapshot and operation validation, crash recovery
+   and tests including interrupted replacement. Do not use the existing
+   snapshot-only store for separate writes to snapshot and journal.
+2. Add stable per-exercise/per-set targets and local operation reducers for
+   edits, completion and timers. Commit the new state and operation together
+   before reporting local success, then wire the watch UI to restore it.
+3. Implement phone-side persisted, atomic workout mutation **and operation
+   deduplication** before returning ACK; the existing `Store.save` swallows
+   failures and the ledger is in memory. Protect against session replacement,
+   reordering and conflicts. Then implement reconnect replay with the same IDs.
+4. Add the requested offline/restart/reconnect integration scenario before
+   calling the feature implemented. Only then address today's workout and
+   produce final APKs. Preserve unrelated changes and do not install APKs.
+
+## Offline-first implementation checkpoint — 2026-11-17
+
+**Not complete and not safe to describe as offline-first.** The user explicitly
+requires the full offline-to-online workflow and instructed not to build final
+delivery APKs for incremental progress. No APK was built or installed during
+this checkpoint. Preserve all existing uncommitted and untracked files.
+
+Work added in this checkpoint:
+
+- `WearSnapshotBuilder` adds `snapshotVersion: 1` and includes per-set
+  `restSec` and `goal` where available. Existing snapshots already include all
+  exercise and set entries, but stable per-exercise/per-set IDs and a complete
+  offline semantics audit are **not done**.
+- The phone GATT server reports `frame_too_large` instead of silently dropping
+  a frame that exceeds `Wire.MAX_FRAME` (65536). Large-frame multipart transfer
+  is **not implemented**.
+- New `lib/wear/link/wear_snapshot_store.dart` validates a v1 snapshot, serializes
+  writes, flushes a temporary file and renames it over the prior private file.
+  It rejects malformed input rather than replacing a valid snapshot. This is a
+  standalone prototype, **not wired to the client/UI**, does not store a
+  journal, and has not been validated for Android process/power failure or
+  directory fsync. Do not claim it guarantees durable transactions. Tests in
+  `test/wear/wear_snapshot_store_test.dart` cover re-instantiation, invalid
+  writes and ordered concurrent writes.
+
+Verification: 42 `test/wear/` tests pass; `flutter analyze`, Kotlin protocol
+tests and `git diff --check` pass. An initial analyzer lint in the new store
+was corrected and the checks rerun successfully. No device tests were performed.
+
+Next action: design and implement a **single transactional durable store** for
+snapshot plus operation journal (including crash recovery, version migrations,
+stable exercise/set targets and duplicate IDs), then integrate it into
+`WearLinkClient` before exposing local edits. Implement phone-side atomic
+application + persisted deduplication before acknowledging journal entries.
+The current `Store.save` catches errors and does not provide transactional
+durability, while the phone's command ledger is in-memory; neither suffices for
+exactly-once offline replay. Tests must simulate lost ACK, restart, conflicting
+phone edits and partial writes before UI or automatic replay is enabled.
+Then implement reconciliation, integration tests, today's workout and phone
+background lifecycle. Never replay index-only edits against a changed session.
+
+## 2026-11-17: offline-first request — incomplete
+
+The companion is **not yet an offline-first workout client**. There is no
+persistent watch-side workout journal, durable command acknowledgement, safe
+offline replay, conflict merge, watch-side today-workout start, or phone
+foreground-service implementation. The existing phone command ledger is
+in-memory, commands address sets by index, the watch clears state on disconnect,
+and UI edits still await the phone. Do not use these APKs expecting disconnected
+editing or automatic reconciliation. A service cannot alone preserve the Dart
+workout engine and authoritative state after process termination.
+
+As preliminary protection, `WorkoutSession` now creates a random `sessionId`,
+persists it in its JSON (`sid`), and creates an ID when loading legacy data
+that lacks one. The ID becomes stable after the migrated session is saved.
+Snapshots expose this identifier and new watch commands carry it; a phone
+rejects a command if the supplied session ID differs from the current workout,
+even when revisions match. The field is optional for compatibility; older
+clients therefore do not get this protection. This is not a durable ledger or
+conflict-resolution scheme and must not be treated as one.
+
+39 Wear Dart tests and Kotlin protocol tests pass; `flutter analyze` and
+`git diff --check` pass. The full Flutter suite reported 1182 passed, 3 skipped,
+and one existing `test/i18n_test.dart` untranslated-key failure, reproduced
+independently. Fresh test APKs were built at the standard paths, verified for
+test IDs, API minimums, the existing debug certificate and absence of INTERNET,
+network-state, scan and location permissions. No APK was installed in this
+session. Hardware, screen-off behavior, Ongoing Activity and bezel remain
+unverified.
+
 ## 1. Session date and state
 
 - Date: 2026-11-15.
@@ -250,6 +570,37 @@ permissions. Icon visibility, background starts, standby, process termination
 and reconnection are **not hardware-verified**. The updated APKs were not
 installed by the assistant.
 
+## 1j. Follow-up investigation (2026-11-17)
+
+The standalone companion did not call `WearRotary.init()`: native rotary events
+were forwarded by MainActivity but no Dart handler was registered. It now
+registers the existing handler. A Flutter widget test sends a platform-channel
+rotary event and checks the active scroll controller; physical bezel input and
+direction remain unverified. `WearLinkScreen` now requests a fresh state on
+resume; this is preventive, not a confirmed fix for the reported freeze.
+
+The existing watch Ongoing Activity service retained its last active state
+indefinitely during connection failures. A two-minute expiry now stops the
+service unless a new active snapshot confirms the workout; a brief disconnect
+does not immediately remove it. This is not hardware-validated. The transport
+continues to be process-memory-owned and Android may terminate it.
+
+The phone GATT server and its Flutter command handler are still tied to the
+activity/engine. Screen-off failure cause has not been established; no phone
+foreground service or persistent background Flutter engine was implemented in
+this pass. The watch UI still blocks edits while awaiting acknowledgements:
+optimistic updates, durable offline queueing and reconciliation remain
+unimplemented. The cause of the recents freeze is not yet established.
+
+37 Wear tests and Kotlin protocol tests pass, Flutter analysis and both test APK
+builds succeed, and package IDs, signing and lack of Internet, network state,
+scan and location permissions were inspected. The watch test APK was installed
+in-place on 2026-11-17 and its activity was started, but no workout, ongoing
+activity, rotary hardware or long screen-off scenario was verified. The phone
+ADB device disappeared before installation, which failed without changing it.
+Reconnect wireless ADB to install `GymMane-test-phone.apk` and continue
+diagnostics. No production package was touched.
+
 ## 2. Commits in this feature
 
 The work is split into small local commits on `feature/wear-os-offline`:
@@ -338,10 +689,13 @@ Standalone JVM Gradle project compiled into the app module.
 - `wear_command_executor.dart` — validates and executes commands; enforces
   `baseRev` conflicts; a bounded `WearCommandLedger` makes duplicate ids
   idempotent. Explicit but invalid set indices are rejected, not silently
-  redirected to the pending set.
+  redirected to the pending set. A replayed completion adopts the watch's rest
+  (`restRemainingSec` preferred, `restEndsAt` as fallback).
 - `wear_snapshot.dart` — authoritative state JSON and a semantic fingerprint.
   Rest ticks and clock fields are excluded from the fingerprint so they do not
-  bump `rev`; rest is sent as a wall-clock `endsAt`.
+  bump `rev`; rest is sent as a wall-clock `endsAt`. It also emits
+  `restDefaults` and the effective `restAfterSec` per set so the watch can
+  start the correct rest offline.
 - `wear_link_status.dart` — connection/pairing status model.
 - `wear_link_server.dart` — phone coordinator: commands → executor → ack,
   state push on `fit` changes, and **serialized pushes** so a snapshot built

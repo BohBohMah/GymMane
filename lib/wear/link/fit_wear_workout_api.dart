@@ -23,6 +23,20 @@ class FitWearWorkoutApi implements WearWorkoutApi {
   int get restTotal => fit.restTotal;
 
   @override
+  int normalRestAfter(int exerciseIndex, int setIndex) => fit.normalRestAfter(exerciseIndex, setIndex);
+
+  @override
+  Map<String, int> get restDefaults => {
+    'normal': fit.restSeconds,
+    'mini': fit.miniRestSeconds,
+    'change': fit.changeRestSeconds,
+    'side': fit.sideRestSeconds,
+  };
+
+  @override
+  void adoptRest(DateTime endsAt, int totalSec) => fit.adoptRest(endsAt, totalSec);
+
+  @override
   String get effortMode => fit.effortMode;
 
   @override

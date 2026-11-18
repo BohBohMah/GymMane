@@ -8,6 +8,17 @@ abstract class WearWorkoutApi {
   bool get complete;
   int get elapsedSeconds;
   int get restTotal;
+
+  /// Effective rest that would start if [setIndex] were completed now,
+  /// including per-set, mini, change-exercise and per-exercise settings.
+  int normalRestAfter(int exerciseIndex, int setIndex);
+
+  /// Global rest durations the watch needs to resolve a rest without a phone.
+  Map<String, int> get restDefaults;
+
+  /// Adopts an already running rest at an absolute deadline, used when a
+  /// watch completion is replayed after being offline.
+  void adoptRest(DateTime endsAt, int totalSec);
   String get effortMode;
   String get workoutName;
   bool get hasData;
