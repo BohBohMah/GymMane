@@ -304,10 +304,10 @@ available).
 
 ## 11. Disconnect and reconnect
 
-1. On the watch tap **DISCONNECT**. This stops the watch client but does not
-   erase its stored authorization key.
-2. Tap **CONNECT PHONE**, select the bonded HONOR again, and wait for the
-   connected status. A successful resume should not require a new PIN.
+1. Move the watch out of Bluetooth range or switch off Bluetooth temporarily.
+   Keep the existing pairing in the system and in GymMane.
+2. Bring the devices back into range or restore Bluetooth. With both apps
+   running, the watch should reconnect automatically using the existing pairing.
 3. Verify the current workout snapshot arrives again and that the phone still
    shows the one completed set.
 4. Leave the phone GymMane app open in the foreground for this initial test.
@@ -345,18 +345,17 @@ the journal must survive app restarts.
    Confirm the workout is unchanged. Repeat and confirm that it leaves no entry
    in the phone's history.
 
-### Watch finishes and discards, disconnected or killed
+### Watch saves or discards while disconnected
 
-1. Disconnect the link (or stop the phone app). Make several unsynced edits,
-   then confirm **DISCARD** on the watch.
-2. Expected: the watch keeps the workout visible in a "waiting" state and
-   refuses further edits instead of losing them.
-3. Fully close the watch app from recents and reopen it. Expected: the same
-   workout and the pending finish are still there.
-4. Reconnect. Expected: the phone first receives every pending weight, rep,
-   set and exercise change, then the discard; only then does the watch clear.
-5. If the phone already had no workout, the watch may also clear on the
-   explicit no-workout reply.
+1. Go out of Bluetooth range or stop the phone app. Change a weight and
+   complete a set, then tap **FINISH SESSION** on the watch. The watch should
+   return to Home after recording the pending save.
+2. Close the watch app from recents and reopen it. Bring the devices back into
+   range with both apps open. Confirm the phone history contains one session
+   with the completed sets and their edited values.
+3. Repeat with a new workout and **DISCARD**. The watch should keep the pending
+   discard across an app restart. Restore the link and verify that the workout
+   clears and the phone history gains no entry.
 
 ## 12. Bluetooth-only / no-network check
 
@@ -378,8 +377,8 @@ Do this after installation, ADB setup and the initial pairing:
 2. If desired, turn off watch Wi-Fi too; keep watch Bluetooth enabled. This will
    disconnect wireless ADB, which uses Wi-Fi, but should not affect the
    phone-watch BLE link.
-3. Reconnect from the watch if needed and repeat a reps/weight edit and a set
-   completion.
+3. With both apps running, wait for the watch to reconnect automatically and
+   repeat a reps/weight edit and a set completion.
 4. Expected: local pairing, snapshots, edits and acknowledgements continue to
    work with Wi-Fi/mobile data off.
 5. Re-enable Wi-Fi to resume wireless ADB and collect watch logs. Do not use
