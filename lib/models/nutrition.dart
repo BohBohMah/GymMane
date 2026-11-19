@@ -472,16 +472,18 @@ class MealPlan {
 }
 
 class WaterSip {
-  const WaterSip(this.at, this.ml);
+  const WaterSip(this.at, this.ml, {this.operationId});
 
   final DateTime at;
   final int ml;
+  final String? operationId;
 
-  Map<String, dynamic> toJson() => {'at': at.toIso8601String(), 'ml': ml};
+  Map<String, dynamic> toJson() => {'at': at.toIso8601String(), 'ml': ml, 'op': ?operationId};
 
   factory WaterSip.fromJson(Map<String, dynamic> j) => WaterSip(
         DateTime.tryParse(j['at'] as String? ?? '') ?? DateTime.now(),
         ((j['ml'] as num?)?.toInt() ?? 0).clamp(0, 5000),
+        operationId: j['op'] as String?,
       );
 }
 

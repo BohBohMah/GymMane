@@ -187,6 +187,7 @@ void main() {
     final before = list.position.pixels;
     WearRotary.turn(60);
     await tester.pump();
+    await tester.pump(const Duration(milliseconds: 160));
     expect(list.position.pixels, greaterThan(before));
   });
 

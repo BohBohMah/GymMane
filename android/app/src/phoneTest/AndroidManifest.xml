@@ -1,0 +1,16 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <!-- The phone test app does not publish the unrelated Wear tile services. -->
+    <application>
+        <service android:name=".GymTileService" tools:node="remove" />
+        <service android:name=".GymComplicationService" tools:node="remove" />
+        <receiver android:name=".HeatmapWidgetProvider" tools:node="remove" />
+        <receiver android:name=".StatsWidgetProvider" tools:node="remove" />
+        <receiver android:name=".BodyWidgetProvider" tools:node="remove" />
+        <receiver android:name=".TodayWidgetProvider" tools:node="remove" />
+        <receiver android:name=".WeekWidgetProvider" tools:node="remove" />
+        <receiver android:name=".WaterWidgetProvider" tools:node="remove" />
+        <receiver android:name=".ProteinWidgetProvider" tools:node="remove" />
+        <receiver android:name=".KcalWidgetProvider" tools:node="remove" />
+    </application>
+</manifest>

@@ -184,6 +184,7 @@ abstract class FitCore extends ChangeNotifier {
   bool _loading = false;
   Timer? _saveDebounce;
   bool _wearTransaction = false;
+  bool _wearNotificationPending = false;
   final Map<String, String> wearAppliedOperations = {};
 
   void refreshAwards({bool silent = false}) {}
@@ -241,7 +242,16 @@ abstract class FitCore extends ChangeNotifier {
     }
   }
 
-  /// Suppress intermediate saves while a watch command is being applied.
+  @override
+  void notifyListeners() {
+    if (_wearTransaction) {
+      _wearNotificationPending = true;
+      return;
+    }
+    super.notifyListeners();
+  }
+
+  /// Suppress intermediate saves and notifications while a watch batch is applied.
   /// The mutation and its deduplication record are saved together afterwards.
   T applyWearTransaction<T>(T Function() apply) {
     if (_wearTransaction) throw StateError('nested wear transaction');
@@ -252,6 +262,10 @@ abstract class FitCore extends ChangeNotifier {
       return apply();
     } finally {
       _wearTransaction = false;
+      if (_wearNotificationPending) {
+        _wearNotificationPending = false;
+        super.notifyListeners();
+      }
     }
   }
 

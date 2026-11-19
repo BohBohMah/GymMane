@@ -103,7 +103,7 @@ class FitWearWorkoutApi implements WearWorkoutApi {
   void setRest(int seconds) => fit.setRest(seconds);
 
   @override
-  void finish() => fit.finishSession();
+  void finish({int? elapsedSeconds}) => fit.finishSession(elapsedOverride: elapsedSeconds);
 
   @override
   void continueSession() => fit.continueSession();

@@ -15,9 +15,12 @@ class WearSnapshot {
 }
 
 class WearSnapshotBuilder {
-  WearSnapshotBuilder(this.api);
+  WearSnapshotBuilder(this.api, {this.displayFor, this.sideRestFor, this.customStepsFor});
 
   final WearWorkoutApi api;
+  final Map<String, dynamic> Function(String exerciseId)? displayFor;
+  final int Function(int exerciseIndex, SessionSet set)? sideRestFor;
+  final List<String>? Function(String exerciseId)? customStepsFor;
 
   String workoutId() {
     final session = api.session;
@@ -40,6 +43,15 @@ class WearSnapshotBuilder {
   }
 
   String fingerprint() => jsonEncode(_semantic(api.session));
+
+  String fingerprintOf(Map<String, dynamic> snapshot) => jsonEncode(
+    Map<String, dynamic>.of(snapshot)
+      ..remove('snapshotVersion')
+      ..remove('rev')
+      ..remove('bootId')
+      ..remove('elapsedSec')
+      ..remove('serverNow'),
+  );
 
   Map<String, dynamic> _semantic(WorkoutSession? session) => {
     'status': _status(session),
@@ -100,6 +112,8 @@ class WearSnapshotBuilder {
           'name': session.exercises[exerciseIndex].name,
           'primary': session.exercises[exerciseIndex].primary,
           'linkedNext': session.exercises[exerciseIndex].linkedNext,
+          ...?displayFor?.call(session.exercises[exerciseIndex].id),
+          'guide': ?customStepsFor?.call(session.exercises[exerciseIndex].id),
           'sets': [
             for (var index = 0; index < session.exercises[exerciseIndex].sets.length; index++)
               _set(exerciseIndex, session.exercises[exerciseIndex].sets[index], index),
@@ -110,6 +124,7 @@ class WearSnapshotBuilder {
 
   Map<String, dynamic> _set(int exerciseIndex, SessionSet set, int index) {
     final restAfter = api.normalRestAfter(exerciseIndex, index);
+    final sideRest = sideRestFor?.call(exerciseIndex, set) ?? 0;
     return {
       'index': index,
       'setId': set.setId,
@@ -124,6 +139,7 @@ class WearSnapshotBuilder {
       if (set.km != null) 'km': set.km,
       if (set.rest != null) 'restSec': set.rest,
       if (restAfter > 0) 'restAfterSec': restAfter,
+      if (sideRest > 0) 'sideRestSec': sideRest,
       if (set.goal != null) 'goal': set.goal,
       if (set.note.isNotEmpty) 'note': set.note,
     };

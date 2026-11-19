@@ -32,7 +32,7 @@ void main() {
     await Future<void>.delayed(Duration.zero);
   }
 
-  Future<void> activeWorkout({int rev = 1, double weight = 60, int reps = 8}) => native('state', {
+  Future<void> activeWorkout({int rev = 1, double weight = 60, int reps = 8, List<String> applied = const []}) => native('state', {
     'snapshotVersion': 1,
     'rev': rev,
     'bootId': 'b',
@@ -40,6 +40,7 @@ void main() {
     'workoutId': 'w',
     'name': 'Push',
     'currentIndex': 0,
+    'appliedOperationIds': applied,
     'restDefaults': {'normal': 90, 'mini': 20, 'change': 0, 'side': 0},
     'exercises': [
       {
@@ -206,15 +207,10 @@ void main() {
     await Future<void>.delayed(Duration.zero);
 
     Map sentCommand() => calls.where((call) => call.method == 'sendCommand').last.arguments as Map;
-    var sent = sentCommand();
-    expect(sent['action'], 'updateSet');
-    expect((sent['args'] as Map)['weight'], 65);
-    expect(client().workout.value!.hasWorkout, isTrue);
-
-    await native('ack', {'id': sent['id'], 'ok': true, 'rev': 5, 'code': 'ok'});
-    await Future<void>.delayed(Duration.zero);
-    sent = sentCommand();
-    expect(sent['action'], 'saveExit');
+    final sent = sentCommand();
+    final operations = (sent['args'] as Map)['operations'] as List;
+    expect(operations.map((op) => op['action']), ['updateSet', 'saveExit']);
+    expect(operations.first['args']['weight'], 65);
     expect(client().workout.value!.hasWorkout, isTrue);
 
     await native('ack', {'id': sent['id'], 'ok': true, 'rev': 6, 'code': 'ok'});
@@ -235,13 +231,10 @@ void main() {
     await Future<void>.delayed(Duration.zero);
 
     Map sentCommand() => calls.where((call) => call.method == 'sendCommand').last.arguments as Map;
-    var sent = sentCommand();
-    expect(sent['action'], 'finish');
-
-    await native('ack', {'id': sent['id'], 'ok': true, 'rev': 2, 'code': 'ok'});
-    await Future<void>.delayed(Duration.zero);
-    sent = sentCommand();
-    expect(sent['action'], 'saveExit');
+    final sent = sentCommand();
+    final operations = (sent['args'] as Map)['operations'] as List;
+    expect(operations.map((op) => op['action']), ['finish', 'saveExit']);
+    expect(operations.last['args']['requiresCompleted'], true);
 
     await native('ack', {'id': sent['id'], 'ok': true, 'rev': 3, 'code': 'ok'});
     await Future<void>.delayed(Duration.zero);
@@ -326,6 +319,84 @@ void main() {
     expect(ack.code, 'queued');
     expect(client().workout.value!.exercises.first.sets.first.weight, 65);
     expect(calls, isEmpty);
+  });
+
+  test('a home action works with a connected phone and no workout', () async {
+    final day = DateTime.now().toIso8601String().split('T').first;
+    final offline = await client().homeCommand('water', args: {'ml': 250});
+    expect(offline.ok, false);
+    expect(calls.where((call) => call.method == 'sendCommand'), isEmpty);
+
+    await native('clientEvent', _connected);
+    await native('state', {
+      'rev': 1,
+      'bootId': 'b',
+      'status': 'idle',
+      'workoutId': '',
+      'exercises': [],
+      'home': {'day': day, 'nutrition': true, 'water': 0, 'glass': 250, 'nutritionReceipts': []},
+    });
+    final pending = client().homeCommand('water', args: {'day': day, 'ml': 250});
+    await Future<void>.delayed(Duration.zero);
+    final sent = calls.where((call) => call.method == 'sendCommand').single.arguments as Map;
+    expect(sent['action'], 'home/water');
+    expect(sent.containsKey('workoutId'), false);
+    await native('state', {
+      'rev': 2,
+      'bootId': 'b',
+      'status': 'idle',
+      'workoutId': '',
+      'exercises': [],
+      'home': {'day': day, 'nutrition': true, 'water': 250, 'glass': 250, 'nutritionReceipts': [sent['id']]},
+    });
+    await native('ack', {'id': sent['id'], 'ok': true, 'rev': 2, 'code': 'ok'});
+    expect((await pending).ok, true);
+    expect(client().home.value!['water'], 250);
+    expect(client().workout.value!.hasWorkout, false);
+  });
+
+  test('offline creatine and its undo are sent in order on reconnect', () async {
+    final day = DateTime.now().toIso8601String().split('T').first;
+    Future<void> receiveHome({List<String> receipts = const [], bool taken = false}) => native('state', {
+      'rev': 5,
+      'bootId': 'b',
+      'status': 'idle',
+      'workoutId': '',
+      'exercises': [],
+      'home': {
+        'day': day,
+        'nutrition': true,
+        'nutritionReceipts': receipts,
+        'supplements': [{'id': 'creatine', 'done': taken}],
+      },
+    });
+    await native('clientEvent', _connected);
+    await receiveHome();
+    await native('clientEvent', {..._connected, 'state': 'connecting'});
+    for (final taken in [true, false]) {
+      final ack = await client().homeCommand(
+        'supplement',
+        args: {'day': day, 'id': 'creatine', 'taken': taken},
+      );
+      expect(ack.code, 'queued');
+      expect(client().home.value!['supplements'][0]['done'], taken);
+    }
+    expect(client().nutritionPending.value, 2);
+    expect(calls.where((call) => call.method == 'sendCommand'), isEmpty);
+    await native('clientEvent', _connected);
+    await receiveHome();
+    List<Map> sent() => calls.where((call) => call.method == 'sendCommand').map((c) => c.arguments as Map).toList();
+    final first = sent().single;
+    expect(first['args']['taken'], true);
+    await receiveHome(receipts: [first['id'] as String], taken: true);
+    expect(client().home.value!['supplements'][0]['done'], false);
+    await native('ack', {'id': first['id'], 'ok': true, 'rev': 5, 'code': 'ok'});
+    final second = sent().last;
+    expect(second['args']['taken'], false);
+    await receiveHome(receipts: [second['id'] as String]);
+    await native('ack', {'id': second['id'], 'ok': true, 'rev': 5, 'code': 'ok'});
+    expect(client().nutritionPending.value, 0);
+    expect(client().home.value!['supplements'][0]['done'], false);
   });
 
   test('rapid connected weight taps update locally and queue every delta', () async {
@@ -426,33 +497,51 @@ void main() {
     await native('clientEvent', _connected);
     await activeWorkout();
     calls.clear();
-    final first = client().pause();
-    final second = client().nextExercise();
+    final first = await client().pause();
+    final second = await client().nextExercise();
     await Future<void>.delayed(Duration.zero);
     final sent = calls.single.arguments as Map;
     await native('ack', {'id': 'refresh', 'ok': true, 'rev': 2, 'code': 'ok'});
     expect(calls.where((c) => c.method == 'sendCommand').length, 1);
     await native('ack', {'id': sent['id'], 'ok': true, 'rev': 3, 'code': 'ok'});
-    await first;
+    expect(first.ok, isTrue);
     await Future<void>.delayed(Duration.zero);
     final next = calls.where((c) => c.method == 'sendCommand').last.arguments as Map;
     expect(next['baseRev'], 3);
     await native('ack', {'id': next['id'], 'ok': true, 'rev': 4, 'code': 'ok'});
-    await second;
+    expect(second.ok, isTrue);
   });
 
   test('timed out command remains durable and retries with the same id', () async {
     await native('clientEvent', _connected);
     await activeWorkout();
     calls.clear();
-    final first = client().command('pause', timeout: const Duration(milliseconds: 20));
+    client().ackTimeout = const Duration(milliseconds: 20);
+    final first = client().pause();
     await Future<void>.delayed(Duration.zero);
     final old = calls.single.arguments as Map;
     expect((await first).code, 'queued');
+    await Future<void>.delayed(const Duration(milliseconds: 40));
+    expect(calls.map((call) => call.method), contains('requestState'));
+    await activeWorkout();
     await Future<void>.delayed(Duration.zero);
     final retry = calls.where((c) => c.method == 'sendCommand').last.arguments as Map;
     expect(retry['id'], old['id']);
     await native('ack', {'id': retry['id'], 'ok': true, 'rev': 2, 'code': 'ok'});
+  });
+
+  test('phone state with a durable receipt recovers a lost acknowledgement', () async {
+    await native('clientEvent', _connected);
+    await activeWorkout(reps: 10);
+    client().ackTimeout = const Duration(milliseconds: 20);
+    calls.clear();
+    await client().adjustSet(0, 0, field: 'reps', delta: 1);
+    await Future<void>.delayed(Duration.zero);
+    final sent = calls.single.arguments as Map;
+    await Future<void>.delayed(const Duration(milliseconds: 40));
+    await activeWorkout(rev: 2, reps: 11, applied: [sent['id'] as String]);
+    expect(client().workout.value!.exercises.first.sets.first.reps, 11);
+    expect(calls.where((call) => call.method == 'sendCommand'), hasLength(1));
   });
 
   test('disconnect keeps pending commands queued on the watch', () async {

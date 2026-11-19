@@ -220,6 +220,18 @@ mixin WorkoutState on FitCore, SettingsState, LibraryState, PlacesState, StatsSt
     if (exs.isNotEmpty) _beginSession(exs, on: logDay);
   }
 
+  bool startWearExercises(List<String> ids) {
+    if (session != null || ids.isEmpty || ids.length > 20 || ids.toSet().length != ids.length) return false;
+    final exercises = <Exercise>[];
+    for (final id in ids) {
+      final exercise = exerciseById(id);
+      if (exercise == null || isArchived(id)) return false;
+      exercises.add(exercise);
+    }
+    _beginSession(exercises);
+    return true;
+  }
+
   List<SessionSet> _fromPlan(String id, List<PlannedSet> planned) {
     final working = planned.where((p) => p.kind != SetKind.warmup).length;
     final base = _workingOpeners(id, count: working == 0 ? 1 : working);
@@ -1932,7 +1944,7 @@ mixin WorkoutState on FitCore, SettingsState, LibraryState, PlacesState, StatsSt
     notifyListeners();
   }
 
-  void finishSession() {
+  void finishSession({int? elapsedOverride}) {
     _holdTimer?.cancel();
     holdEndsAt = null;
     holdOverFrom = null;
@@ -1952,7 +1964,7 @@ mixin WorkoutState on FitCore, SettingsState, LibraryState, PlacesState, StatsSt
     }
     s.summaryVolume = working.fold<double>(0, (sum, st) => sum + st.weakReps * st.weight).round();
     s.summarySets = working.length;
-    s.summaryDuration = s.manual ? _elapsedBefore : sessionElapsed;
+    s.summaryDuration = s.manual ? _elapsedBefore : elapsedOverride ?? sessionElapsed;
     s.complete = true;
     s.clearRest();
     sessionLocked = false;

@@ -44,6 +44,10 @@ class RemoteExercise {
     required this.primary,
     required this.sets,
     required this.linkedNext,
+    this.weightUnit,
+    this.weightStepKg,
+    this.distanceUnit,
+    this.guide = const [],
   });
 
   final String id;
@@ -51,6 +55,10 @@ class RemoteExercise {
   final String primary;
   final List<RemoteSet> sets;
   final bool linkedNext;
+  final String? weightUnit;
+  final double? weightStepKg;
+  final String? distanceUnit;
+  final List<String> guide;
 
   int get pendingIndex => sets.indexWhere((s) => !s.done);
 
@@ -187,6 +195,18 @@ class RemoteWorkout {
             name: raw['name'] as String? ?? '',
             primary: raw['primary'] as String? ?? '',
             linkedNext: raw['linkedNext'] as bool? ?? false,
+            weightUnit: switch (raw['weightUnit']) {
+              'kg' => 'kg',
+              'lb' => 'lb',
+              _ => null,
+            },
+            weightStepKg: (raw['weightStepKg'] as num?)?.toDouble(),
+            guide: (raw['guide'] as List?)?.whereType<String>().toList() ?? const [],
+            distanceUnit: switch (raw['distanceUnit']) {
+              'km' => 'km',
+              'mi' => 'mi',
+              _ => null,
+            },
             sets: [
               for (final set in (raw['sets'] as List?) ?? const [])
                 RemoteSet(

@@ -16,13 +16,19 @@ class WearCommand {
   final String? workoutId;
 
   static WearCommand? fromJson(Map<String, dynamic> json) {
-    final id = json['id'] as String?;
-    final action = json['action'] as String?;
-    if (id == null || id.isEmpty || id.length > 80 || action == null || action.isEmpty) return null;
+    final id = json['id'];
+    final action = json['action'];
+    if (id is! String || id.isEmpty || id.length > 80 ||
+        action is! String || action.isEmpty || action.length > 64) {
+      return null;
+    }
     final raw = json['args'];
+    final baseRev = json['baseRev'];
+    if (baseRev != null && (baseRev is! int || baseRev < 0)) return null;
+    if (raw != null && (raw is! Map || raw.keys.any((key) => key is! String))) return null;
     return WearCommand(
       id: id,
-      baseRev: (json['baseRev'] as num?)?.toInt() ?? 0,
+      baseRev: baseRev is int ? baseRev : 0,
       action: action,
       workoutId: json['workoutId'] is String ? json['workoutId'] as String : null,
       args: raw is Map ? raw.cast<String, dynamic>() : const {},

@@ -37,7 +37,10 @@ class FakeWearApi implements WearWorkoutApi {
   void continueSession() => session!.complete = false;
 
   @override
-  void finish() => session!.complete = true;
+  void finish({int? elapsedSeconds}) {
+    session!.complete = true;
+    session!.summaryDuration = elapsedSeconds;
+  }
 
   @override
   void goNextPending() {
@@ -517,6 +520,15 @@ void main() {
   });
 
   group('RemoteWorkout', () {
+    test('elapsed time waits for a future start countdown anchor', () {
+      final workout = RemoteWorkout.fromJson({
+        'status': 'active',
+        'workoutId': 'countdown',
+        'elapsedSec': 0,
+        'serverNow': DateTime.now().add(const Duration(seconds: 5)).toIso8601String(),
+      });
+      expect(workout.liveElapsedSeconds, 0);
+    });
     test('parses the phone snapshot', () {
       final api = apiWithSession(withRest: true);
       final json = WearSnapshotBuilder(api).build(rev: 3, bootId: 'abc');

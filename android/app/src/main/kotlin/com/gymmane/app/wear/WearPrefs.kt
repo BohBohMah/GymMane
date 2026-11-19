@@ -6,6 +6,7 @@ import com.gymmane.wear.protocol.WearCrypto
 import com.gymmane.wear.protocol.WearJson
 import kotlinx.serialization.json.buildJsonObject
 import java.util.UUID
+import java.security.SecureRandom
 
 object WearUuids {
     val SERVICE = UUID.fromString("6f2a1f3c-7d4b-4a6e-9d0c-2b3a4c5d6e7f")
@@ -22,13 +23,8 @@ class WearPrefs(context: Context) {
         get() = phone.getBoolean("enabled", false)
         set(value) = phone.edit().putBoolean("enabled", value).apply()
 
-    var pairingUntil: Long
-        get() = phone.getLong("pairingUntil", 0L)
-        set(value) = phone.edit().putLong("pairingUntil", value).apply()
-
-    var pairingPin: String
-        get() = phone.getString("pairingPin", "") ?: ""
-        set(value) = phone.edit().putString("pairingPin", value).apply()
+    val pairingUntil: Long get() = pairingDeadline
+    val pairingPin: String get() = currentPin
 
     var lastWatchName: String
         get() = phone.getString("lastWatchName", "") ?: ""
@@ -115,14 +111,27 @@ class WearPrefs(context: Context) {
         set(value) = watch.edit().putBoolean("enabled", value).apply()
 
     fun newPairingPin(): String {
-        val pin = (100000..999999).random().toString()
-        pairingPin = pin
-        pairingUntil = System.currentTimeMillis() + 120_000L
+        val pin = (100000 + random.nextInt(900000)).toString()
+        currentPin = pin
+        pairingDeadline = System.currentTimeMillis() + 120_000L
+        pairingFailures = 0
         return pin
     }
 
     fun clearPairing() {
-        pairingPin = ""
-        pairingUntil = 0L
+        currentPin = ""
+        pairingDeadline = 0L
+        pairingFailures = 0
+    }
+
+    fun notePairingFailure() {
+        if (++pairingFailures >= 5) clearPairing()
+    }
+
+    companion object {
+        private val random = SecureRandom()
+        private var currentPin = ""
+        private var pairingDeadline = 0L
+        private var pairingFailures = 0
     }
 }

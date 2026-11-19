@@ -62,9 +62,14 @@ class WearGattServer(
     private val queue = ArrayDeque<ByteArray>()
     private var sending = false
     private var closeAfterSend = false
+    private var subscribed = false
+    private val handshakeTimeout = Runnable {
+        if (connected != null && session == null) fail("handshake_timeout")
+    }
     private var advertising = false
     private var serviceReady = false
     private var lastSnapshot: String? = null
+    private var lastHomeSent: JsonObject? = null
 
     val supported: Boolean
         get() = Build.VERSION.SDK_INT >= 31 &&
@@ -126,6 +131,7 @@ class WearGattServer(
     }
 
     fun stop() {
+        main.removeCallbacks(handshakeTimeout)
         stopAdvertising()
         session = null
         handshake = null
@@ -133,6 +139,7 @@ class WearGattServer(
         queue.clear()
         sending = false
         closeAfterSend = false
+        subscribed = false
         val device = connected
         connected = null
         if (device != null) runCatching { gattServer?.cancelConnection(device) }
@@ -257,17 +264,20 @@ class WearGattServer(
             offset: Int,
             value: ByteArray,
         ) {
-            if (characteristic.uuid != WearUuids.RX) {
-                if (responseNeeded) {
-                    gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_FAILURE, offset, null)
+            onMain {
+                if (device != connected || !subscribed || characteristic.uuid != WearUuids.RX ||
+                    preparedWrite || offset != 0 || value.isEmpty() || value.size > 512
+                ) {
+                    if (responseNeeded) {
+                        gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_FAILURE, offset, null)
+                    }
+                    return@onMain
                 }
-                return
+                if (responseNeeded) {
+                    gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, offset, null)
+                }
+                handleBytes(value)
             }
-            if (responseNeeded) {
-                gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, offset, value)
-            }
-            if (preparedWrite || offset != 0) return
-            onMain { handleBytes(value) }
         }
 
         override fun onDescriptorWriteRequest(
@@ -279,8 +289,18 @@ class WearGattServer(
             offset: Int,
             value: ByteArray,
         ) {
-            if (responseNeeded) {
-                gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, offset, value)
+            onMain {
+                val enabled = value.contentEquals(BluetoothGattDescriptor.ENABLE_INDICATION_VALUE)
+                val disabled = value.contentEquals(BluetoothGattDescriptor.DISABLE_NOTIFICATION_VALUE)
+                val valid = device == connected && descriptor.uuid == CCCD &&
+                    descriptor.characteristic.uuid == WearUuids.TX && !preparedWrite &&
+                    offset == 0 && (enabled || disabled)
+                if (valid) subscribed = enabled
+                if (responseNeeded) {
+                    val status = if (valid) BluetoothGatt.GATT_SUCCESS else BluetoothGatt.GATT_FAILURE
+                    gattServer?.sendResponse(device, requestId, status, offset, null)
+                }
+                if (valid && disabled && session != null) fail("indications_disabled")
             }
         }
 
@@ -294,11 +314,12 @@ class WearGattServer(
         }
 
         override fun onMtuChanged(device: BluetoothDevice, mtu: Int) {
-            onMain { this@WearGattServer.mtu = mtu.coerceAtLeast(23) }
+            onMain { if (device == connected) this@WearGattServer.mtu = mtu.coerceAtLeast(23) }
         }
 
         override fun onNotificationSent(device: BluetoothDevice, status: Int) {
             onMain {
+                if (device != connected) return@onMain
                 sending = false
                 WearLinkDiagnostics.log(
                     "phone indication completed status=$status remainingChunks=${queue.size}",
@@ -325,6 +346,12 @@ class WearGattServer(
             return
         }
         connected = device
+        session = null
+        lastHomeSent = null
+        subscribed = false
+        main.removeCallbacks(handshakeTimeout)
+        val timeout = if (pairingActive) 125_000L else 15_000L
+        main.postDelayed(handshakeTimeout, timeout)
         reader = FrameReader()
         queue.clear()
         sending = false
@@ -335,6 +362,7 @@ class WearGattServer(
             pskFor = { prefs.pskFor(it) },
             pairingPin = { if (pairingActive) prefs.pairingPin else null },
             onPaired = { id, name, psk -> prefs.savePsk(id, name, psk) },
+            onPairingFailure = { prefs.notePairingFailure() },
         )
         stopAdvertising()
         emit()
@@ -343,6 +371,8 @@ class WearGattServer(
     private fun onDisconnected(device: BluetoothDevice) {
         if (connected?.address != device.address) return
         connected = null
+        subscribed = false
+        main.removeCallbacks(handshakeTimeout)
         session = null
         handshake = null
         reader.reset()
@@ -387,6 +417,8 @@ class WearGattServer(
             }
             is PhoneHandshakeResult.Established -> {
                 session = result.session
+                handshake = null
+                main.removeCallbacks(handshakeTimeout)
                 prefs.lastWatchName = result.watchName
                 if (result.pairedNow) prefs.clearPairing()
                 WearLinkDiagnostics.log(
@@ -474,7 +506,12 @@ class WearGattServer(
             return
         }
         WearLinkDiagnostics.log("phone sending state ${WearLinkDiagnostics.snapshotSummary(json)}")
-        sendSecure("state", data)
+        val home = data["home"] as? JsonObject
+        if (home != null && home != lastHomeSent) {
+            lastHomeSent = home
+            sendSecure("home", home)
+        }
+        sendSecure("state", if (home == null) data else JsonObject(data - "home"))
     }
 
     private fun sendFrame(kind: FrameKind, payload: ByteArray) {

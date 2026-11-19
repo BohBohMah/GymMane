@@ -28,25 +28,30 @@ class WearRotary {
 
   static void init() {
     _channel.setMethodCallHandler((call) async {
-      if (call.method != 'scroll') return;
-      turn((call.arguments as num).toDouble());
+      final delta = call.arguments;
+      if (call.method == 'scroll' && delta is num) turn(delta.toDouble());
     });
   }
 
   static void turn(double delta) {
+    if (!delta.isFinite || delta == 0) return;
     onTurn?.call();
     final c = _stack.isEmpty ? null : _stack.last;
     if (c == null || !c.hasClients) return;
     final p = c.position;
     final current = _targets[c] ?? p.pixels;
-    final target = (current + delta * _sensitivity).clamp(p.minScrollExtent, p.maxScrollExtent).toDouble();
+    final step = (delta * _sensitivity).clamp(-64.0, 64.0);
+    final target = (current + step).clamp(p.minScrollExtent, p.maxScrollExtent).toDouble();
+    if (target == current) return;
     _targets[c] = target;
-    unawaited(c.animateTo(target, duration: const Duration(milliseconds: 140), curve: Curves.easeOutCubic));
+    c.animateTo(target, duration: const Duration(milliseconds: 140), curve: Curves.easeOutCubic)
+        .whenComplete(() {
+          if (_targets[c] == target) _targets.remove(c);
+        });
   }
 
   static void attach(ScrollController c) {
     _stack.add(c);
-    _targets[c] = c.hasClients ? c.position.pixels : 0;
   }
 
   static void detach(ScrollController c) {
@@ -367,9 +372,10 @@ class _WearClockState extends State<WearClock> {
 }
 
 class WearPage extends StatefulWidget {
-  const WearPage({super.key, required this.children});
+  const WearPage({super.key, required this.children, this.scaleEdges = true});
 
   final List<Widget> children;
+  final bool scaleEdges;
 
   @override
   State<WearPage> createState() => _WearPageState();
@@ -395,7 +401,14 @@ class _WearPageState extends State<WearPage> {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, box) {
-        final side = box.maxWidth * 0.1;
+        final side = (box.maxWidth * 0.10).clamp(14.0, 28.0);
+        if (!widget.scaleEdges || MediaQuery.disableAnimationsOf(context)) {
+          return ListView(
+            controller: _scroll,
+            padding: EdgeInsets.fromLTRB(side, box.maxHeight * 0.14, side, box.maxHeight * 0.19),
+            children: widget.children,
+          );
+        }
         return AnimatedBuilder(
           animation: _scroll,
           builder: (context, child) {
@@ -613,6 +626,7 @@ class WearButton extends StatelessWidget {
     this.height = 48,
     this.icon,
     this.color,
+    this.selected,
   });
 
   final String label;
@@ -621,6 +635,7 @@ class WearButton extends StatelessWidget {
   final double height;
   final IconData? icon;
   final Color? color;
+  final bool? selected;
 
   @override
   Widget build(BuildContext context) {
@@ -631,6 +646,7 @@ class WearButton extends StatelessWidget {
     return Semantics(
       button: true,
       enabled: enabled,
+      selected: selected,
       label: label,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,

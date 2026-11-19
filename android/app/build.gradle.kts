@@ -28,6 +28,7 @@ require(
 }
 val phoneTestBuild = gymmaneTestVariant == "phone"
 val wearTestBuild = gymmaneTestVariant == "wear"
+val wearDiagnostics = providers.gradleProperty("gymmaneWearDiagnostics").orNull == "true"
 val variantApplicationId = when {
     phoneTestBuild -> "com.gymmane.test.phone"
     wearTestBuild -> "com.gymmane.test.wear"
@@ -64,7 +65,7 @@ android {
         buildConfigField(
             "boolean",
             "GYMMANE_WEAR_DIAGNOSTICS",
-            (phoneTestBuild || wearTestBuild).toString(),
+            ((phoneTestBuild || wearTestBuild) && wearDiagnostics).toString(),
         )
         manifestPlaceholders["gymmaneScheme"] = if (phoneTestBuild) "gymmane-test-phone" else "gymmane"
         manifestPlaceholders["gymmaneLabel"] = when {

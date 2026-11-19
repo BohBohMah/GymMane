@@ -15,7 +15,6 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
-import android.os.SystemClock
 import com.gymmane.wear.protocol.Chunker
 import com.gymmane.wear.protocol.FrameKind
 import com.gymmane.wear.protocol.FrameReader
@@ -61,9 +60,13 @@ class WearGattClient(
     private var wantConnected = false
     private var retryAttempt = 0
     private var lastError = ""
-    private var connectStartedAt = 0L
+    private var awaitingPin = false
+    private var dashboard: Map<String, Any?>? = null
 
     private val retry = Runnable { connect() }
+    private val watchdog = Runnable {
+        if (session == null && gatt != null) fail("connection_timeout")
+    }
 
     val supported: Boolean
         get() = Build.VERSION.SDK_INT >= 31 &&
@@ -72,19 +75,27 @@ class WearGattClient(
 
     fun start(address: String, name: String): Map<String, Any?> {
         if (!supported) return statusMap()
+        if (prefs.phoneAddress != address) {
+            disconnect()
+            prefs.watchPsk = null
+        }
         prefs.clientEnabled = true
         prefs.phoneAddress = address
         if (name.isNotBlank()) prefs.phoneName = name
         wantConnected = true
         retryAttempt = 0
         lastError = ""
-        if (gatt != null && session == null && connectStartedAt > 0L &&
-            SystemClock.elapsedRealtime() - connectStartedAt >= CONNECTION_STALL_MS
-        ) {
-            WearLinkDiagnostics.log("watch replacing stalled GATT connection")
-            disconnect()
-        }
         connect()
+        return statusMap()
+    }
+
+    fun resume(): Map<String, Any?> {
+        if (prefs.clientEnabled && prefs.phoneAddress.isNotBlank() && !wantConnected &&
+            !lastError.startsWith("rejected_")
+        ) {
+            wantConnected = true
+            connect()
+        }
         return statusMap()
     }
 
@@ -118,6 +129,9 @@ class WearGattClient(
     fun submitPin(pin: String): Boolean {
         val current = handshake ?: return false
         val message = current.submitPin(pin) ?: return false
+        awaitingPin = false
+        main.removeCallbacks(watchdog)
+        main.postDelayed(watchdog, CONNECTION_STALL_MS)
         sendHandshake(message)
         return true
     }
@@ -165,7 +179,7 @@ class WearGattClient(
         "error" to lastError,
         "pairingCode" to "",
         "sdk" to Build.VERSION.SDK_INT,
-        "pinRequired" to (handshake != null && session == null && lastError.isEmpty() && wantConnected),
+        "pinRequired" to awaitingPin,
     )
 
     @SuppressLint("MissingPermission")
@@ -180,6 +194,7 @@ class WearGattClient(
         if (!adapter.isEnabled) {
             lastError = "bluetooth_off"
             emit()
+            scheduleRetry()
             return
         }
         val address = prefs.phoneAddress
@@ -202,7 +217,6 @@ class WearGattClient(
         }
         lastError = ""
         emit()
-        connectStartedAt = SystemClock.elapsedRealtime()
         gatt = try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 device.connectGatt(app, false, callback, BluetoothDevice.TRANSPORT_LE)
@@ -212,8 +226,13 @@ class WearGattClient(
         } catch (_: Exception) {
             lastError = "connect_failed"
             emit()
-            scheduleRetry()
             null
+        }
+        if (gatt == null) {
+            scheduleRetry()
+        } else {
+            main.removeCallbacks(watchdog)
+            main.postDelayed(watchdog, CONNECTION_STALL_MS)
         }
     }
 
@@ -224,13 +243,15 @@ class WearGattClient(
         rx = null
         tx = null
         session = null
+        dashboard = null
         handshake = null
         reader.reset()
         queue.clear()
         sending = false
         discoverStarted = false
         indicationReady = false
-        connectStartedAt = 0L
+        awaitingPin = false
+        main.removeCallbacks(watchdog)
         if (current != null) {
             runCatching { current.disconnect() }
             runCatching { current.close() }
@@ -434,17 +455,20 @@ class WearGattClient(
         when (val result = current.onMessage(message)) {
             is WatchHandshakeResult.Reply -> result.messages.forEach { sendHandshake(it) }
             is WatchHandshakeResult.NeedPin -> {
+                awaitingPin = true
+                main.removeCallbacks(watchdog)
+                main.postDelayed(watchdog, 120_000L)
                 WearLinkDiagnostics.log("watch handshake requires first-pair PIN")
                 onPinRequired(result.phoneName)
             }
             is WatchHandshakeResult.Ready -> {
                 session = result.session
-                connectStartedAt = 0L
+                handshake = null
+                main.removeCallbacks(watchdog)
                 sendHandshake(result.confirm)
                 lastError = ""
-                WearLinkDiagnostics.log("watch handshake ready; requesting state")
+                WearLinkDiagnostics.log("watch handshake ready")
                 emit()
-                requestState()
             }
             is WatchHandshakeResult.Rejected -> {
                 lastError = "rejected_${result.reason}"
@@ -469,10 +493,12 @@ class WearGattClient(
             return fail("bad_mac")
         }
         when (opened.type) {
+            "home" -> dashboard = WearJson.toMap(opened.data)
             "state" -> {
                 val data = WearJson.toMap(opened.data)
                 WearLinkDiagnostics.log("watch received state ${WearLinkDiagnostics.snapshotSummary(data)}")
-                onState(data)
+                val home = dashboard
+                onState(if (home == null) data else data + ("home" to home))
             }
             "ack" -> {
                 val data = WearJson.toMap(opened.data)
@@ -542,8 +568,8 @@ class WearGattClient(
     private fun fail(reason: String) {
         lastError = reason
         WearLinkDiagnostics.log("watch GATT client error=$reason")
-        emit()
         disconnect()
+        emit()
         scheduleRetry()
     }
 

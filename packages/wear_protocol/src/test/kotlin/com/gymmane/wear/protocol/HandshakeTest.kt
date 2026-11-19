@@ -9,6 +9,22 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class HandshakeTest {
+    @Test
+    fun canceledPairingCannotBeConfirmed() {
+        var pin: String? = "123456"
+        var stored = false
+        val phone = PhoneHandshake("Phone", { null }, { pin }, { _, _, _ -> stored = true })
+        val watch = WatchHandshake("watch-1", "Watch", null) {}
+        val hello = phone.onMessage(watch.start()) as PhoneHandshakeResult.Reply
+        watch.onMessage(hello.messages.single())
+        val grant = phone.onMessage(watch.submitPin("123456")!!) as PhoneHandshakeResult.Reply
+        val ready = watch.onMessage(grant.messages.single()) as WatchHandshakeResult.Ready
+        pin = null
+        val rejected = phone.onMessage(ready.confirm) as PhoneHandshakeResult.Reply
+        assertTrue(rejected.close)
+        assertFalse(stored)
+    }
+
     private data class Pairing(
         val phoneSession: SecureSession?,
         val watchSession: SecureSession?,

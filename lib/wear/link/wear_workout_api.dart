@@ -39,7 +39,7 @@ abstract class WearWorkoutApi {
   void skipRest();
   void nudgeRest(int seconds);
   void setRest(int seconds);
-  void finish();
+  void finish({int? elapsedSeconds});
   void continueSession();
   void saveAndExit();
   void resumeSession();

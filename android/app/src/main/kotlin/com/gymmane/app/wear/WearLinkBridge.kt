@@ -5,6 +5,7 @@ import android.app.Activity
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
+import com.gymmane.app.CompanionTiles
 import io.flutter.plugin.common.MethodChannel
 import org.json.JSONObject
 
@@ -76,6 +77,13 @@ object WearLinkBridge {
                     ensure(false, result) { startClient(address, name) }
                 }
                 "stopClient" -> result.success(stopClient())
+                "resumeClient" -> {
+                    val store = prefs()
+                    val next = if (store?.clientEnabled == true && missing(false).isEmpty()) {
+                        client()?.resume()
+                    } else null
+                    result.success(next ?: clientStatus())
+                }
                 "clientStatus" -> result.success(clientStatus())
                 "submitPin" -> {
                     val pin = call.argument<String>("pin") ?: ""
@@ -340,7 +348,7 @@ object WearLinkBridge {
 
     private fun startClient(address: String, name: String): Map<String, Any?> {
         if (address.isBlank()) return clientStatus() + mapOf("error" to "no_phone")
-        return client(address, name)?.start(address, name) ?: unsupportedMap()
+        return client()?.start(address, name) ?: unsupportedMap()
     }
 
     private fun stopClient(): Map<String, Any?> {
@@ -366,10 +374,11 @@ object WearLinkBridge {
         } ?: unsupportedMap()
 
     private fun forgetPhone(): Map<String, Any?> {
+        if (isWatch()) activity?.let { CompanionTiles.clear(it.applicationContext) }
         activity?.applicationContext?.let { WearWorkoutService.stop(it) }
         workoutServiceActive = false
         val store = prefs() ?: return unsupportedMap()
-        val target = client ?: client(store.phoneAddress, store.phoneName)
+        val target = client ?: client()
         val status = target?.forget() ?: store.run {
             clientEnabled = false
             watchPsk = null
@@ -390,7 +399,7 @@ object WearLinkBridge {
         return status
     }
 
-    private fun client(address: String, name: String): WearGattClient? {
+    private fun client(): WearGattClient? {
         val current = activity ?: return null
         client?.let { return it }
         val store = WearPrefs(current)
@@ -402,6 +411,7 @@ object WearLinkBridge {
                 channel?.invokeMethod("clientEvent", event)
             },
             onState = { state ->
+                CompanionTiles.save(appContext, state)
                 val status = state["status"] as? String
                 val active = status == "active" || status == "paused" || status == "parked"
                 if (active && !workoutServiceActive) {
@@ -429,10 +439,6 @@ object WearLinkBridge {
                 channel?.invokeMethod("pinRequired", mapOf("phoneName" to phoneName))
             },
         )
-        if (address.isNotBlank()) {
-            store.phoneAddress = address
-            if (name.isNotBlank()) store.phoneName = name
-        }
         client = created
         return created
     }

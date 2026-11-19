@@ -1,7 +1,5 @@
 package com.gymmane.wear.protocol
 
-import java.io.ByteArrayOutputStream
-
 enum class FrameKind(val code: Byte) {
     HANDSHAKE(1),
     SECURE(2),
@@ -12,7 +10,7 @@ class WireFrame(val kind: FrameKind, val payload: ByteArray)
 object Wire {
     const val PROTOCOL_VERSION = 1
     const val MAX_FRAME = 65536
-    private const val HEADER = 5
+    internal const val HEADER = 5
 
     fun encode(kind: FrameKind, payload: ByteArray): ByteArray {
         require(payload.size <= MAX_FRAME) { "frame too large" }
@@ -30,34 +28,49 @@ object Wire {
 class WireFormatException(message: String) : Exception(message)
 
 class FrameReader {
-    private var pending = ByteArray(0)
+    private val header = ByteArray(Wire.HEADER)
+    private var headerSize = 0
+    private var kind = FrameKind.HANDSHAKE
+    private var payload: ByteArray? = null
+    private var payloadSize = 0
 
     fun feed(chunk: ByteArray): List<WireFrame> {
         if (chunk.isEmpty()) return emptyList()
-        val joined = ByteArrayOutputStream(pending.size + chunk.size)
-        joined.write(pending)
-        joined.write(chunk)
-        val data = joined.toByteArray()
         val frames = mutableListOf<WireFrame>()
         var at = 0
-        while (data.size - at >= 5) {
-            val kind = FrameKind.entries.firstOrNull { it.code == data[at] }
-                ?: throw WireFormatException("unknown frame kind")
-            val length = ((data[at + 1].toInt() and 0xff) shl 24) or
-                ((data[at + 2].toInt() and 0xff) shl 16) or
-                ((data[at + 3].toInt() and 0xff) shl 8) or
-                (data[at + 4].toInt() and 0xff)
-            if (length < 0 || length > Wire.MAX_FRAME) throw WireFormatException("bad frame length")
-            if (data.size - at < 5 + length) break
-            frames += WireFrame(kind, data.copyOfRange(at + 5, at + 5 + length))
-            at += 5 + length
+        while (at < chunk.size) {
+            if (payload == null) {
+                val bytes = minOf(header.size - headerSize, chunk.size - at)
+                chunk.copyInto(header, headerSize, at, at + bytes)
+                headerSize += bytes
+                at += bytes
+                if (headerSize < header.size) break
+                kind = FrameKind.entries.firstOrNull { it.code == header[0] }
+                    ?: throw WireFormatException("unknown frame kind")
+                val length = ((header[1].toInt() and 0xff) shl 24) or
+                    ((header[2].toInt() and 0xff) shl 16) or
+                    ((header[3].toInt() and 0xff) shl 8) or
+                    (header[4].toInt() and 0xff)
+                if (length !in 0..Wire.MAX_FRAME) throw WireFormatException("bad frame length")
+                payload = ByteArray(length)
+            }
+            val frame = checkNotNull(payload)
+            val bytes = minOf(frame.size - payloadSize, chunk.size - at)
+            chunk.copyInto(frame, payloadSize, at, at + bytes)
+            payloadSize += bytes
+            at += bytes
+            if (payloadSize == frame.size) {
+                frames += WireFrame(kind, frame)
+                reset()
+            }
         }
-        pending = if (at == data.size) ByteArray(0) else data.copyOfRange(at, data.size)
         return frames
     }
 
     fun reset() {
-        pending = ByteArray(0)
+        headerSize = 0
+        payload = null
+        payloadSize = 0
     }
 }
 

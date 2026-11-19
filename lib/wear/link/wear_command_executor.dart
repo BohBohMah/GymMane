@@ -32,9 +32,9 @@ class WearCommandExecutor {
       'skipRest' => _skipRest(),
       'nudgeRest' => _nudgeRest(command.args),
       'setRest' => _setRest(command.args),
-      'finish' => _finish(),
+      'finish' => _finish(command.args),
       'continueSession' => _continue(),
-      'saveExit' => _saveExit(),
+      'saveExit' => _saveExit(command.args),
       'resumeSession' => _resumeSession(),
       _ => WearExecution.unsupported,
     };
@@ -235,11 +235,13 @@ class WearCommandExecutor {
     return WearExecution.changedOk;
   }
 
-  WearExecution _finish() {
+  WearExecution _finish(Map<String, dynamic> args) {
     final session = api.session;
     if (session == null) return WearExecution.noSession;
     if (session.complete) return WearExecution.unchanged;
-    api.finish();
+    final elapsed = args['elapsedSec'];
+    if (elapsed != null && (elapsed is! int || elapsed < 0 || elapsed > 604800)) return WearExecution.invalid;
+    api.finish(elapsedSeconds: elapsed as int?);
     return WearExecution.changedOk;
   }
 
@@ -251,8 +253,10 @@ class WearCommandExecutor {
     return WearExecution.changedOk;
   }
 
-  WearExecution _saveExit() {
-    if (api.session == null) return WearExecution.noSession;
+  WearExecution _saveExit(Map<String, dynamic> args) {
+    final session = api.session;
+    if (session == null) return WearExecution.noSession;
+    if (args['requiresCompleted'] == true && !session.complete) return WearExecution.invalid;
     api.saveAndExit();
     return WearExecution.changedOk;
   }

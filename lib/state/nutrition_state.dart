@@ -646,10 +646,12 @@ mixin NutritionState on FitCore, ToolsState, StatsState {
     notifyListeners();
   }
 
-  void addWater([int? ml]) {
-    final amount = ml ?? activeGoals.glassMl;
+  void addWater([int? ml]) => addWaterOn(nutritionDay, ml: ml);
+
+  void addWaterOn(DateTime day, {int? ml, String? operationId}) {
+    final amount = ml ?? goalsFor(day).glassMl;
     if (amount <= 0) return;
-    waterLog.add(WaterSip(_stampFor(nutritionDay), amount.clamp(1, 5000)));
+    waterLog.add(WaterSip(_stampFor(day), amount.clamp(1, 5000), operationId: operationId));
     _persist();
     notifyListeners();
   }
@@ -955,8 +957,8 @@ mixin NutritionState on FitCore, ToolsState, StatsState {
     notifyListeners();
   }
 
-  List<FoodEntry> _logCopies(Iterable<FoodEntry> items, Meal meal, {double factor = 1}) {
-    final at = _stampFor(nutritionDay);
+  List<FoodEntry> _logCopies(Iterable<FoodEntry> items, Meal meal, {double factor = 1, DateTime? day}) {
+    final at = _stampFor(day ?? nutritionDay);
     final added = [
       for (final e in items) e.copyWith(id: _newId('e'), at: at, meal: meal, servings: e.servings * factor),
     ];
@@ -1201,7 +1203,8 @@ mixin NutritionState on FitCore, ToolsState, StatsState {
     return count;
   }
 
-  List<FoodEntry> logPlanMeal(MealPlan plan, Meal meal) => _logCopies(plan.itemsOf(meal), meal);
+  List<FoodEntry> logPlanMeal(MealPlan plan, Meal meal, {DateTime? day}) =>
+      _logCopies(plan.itemsOf(meal), meal, day: day);
 
   int logPlanDay(MealPlan plan) {
     var n = 0;
@@ -1561,10 +1564,18 @@ mixin NutritionState on FitCore, ToolsState, StatsState {
   }
 
   void toggleSupplement(String id) {
-    final key = _dk(nutritionDay);
+    setSupplementTakenOn(nutritionDay, id, !takenOn(nutritionDay).contains(id));
+  }
+
+  bool setSupplementTakenOn(DateTime day, String id, bool marked) {
+    if (takenOn(day).contains(id) == marked) return false;
+    final key = _dk(day);
     final taken = supplementsTaken.putIfAbsent(key, () => <String>{});
-    final marked = !taken.remove(id);
-    if (marked) taken.add(id);
+    if (marked) {
+      taken.add(id);
+    } else {
+      taken.remove(id);
+    }
     if (taken.isEmpty) supplementsTaken.remove(key);
     final i = supplements.indexWhere((s) => s.id == id);
     final stock = i < 0 ? null : supplements[i].stock;
@@ -1575,6 +1586,7 @@ mixin NutritionState on FitCore, ToolsState, StatsState {
     syncSupplementReminder();
     _persist();
     notifyListeners();
+    return true;
   }
 
   void takeSupplementsOn(DateTime day, List<String> ids) {

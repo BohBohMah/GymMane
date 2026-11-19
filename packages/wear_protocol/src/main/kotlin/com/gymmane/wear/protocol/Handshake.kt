@@ -17,6 +17,7 @@ class PhoneHandshake(
     private val pskFor: (String) -> ByteArray?,
     private val pairingPin: () -> String?,
     private val onPaired: (watchId: String, watchName: String, psk: ByteArray) -> Unit,
+    private val onPairingFailure: () -> Unit = {},
 ) {
     private enum class Phase { HELLO, AUTH, CONFIRM, DONE }
 
@@ -69,7 +70,7 @@ class PhoneHandshake(
                 listOf(HandshakeCrypto.phoneHello(phoneName, phoneNonce, "resume")),
             )
         }
-        if (pin == null || pin.length < 4) return reject("not_paired")
+        if (pin == null || !validPin(pin)) return reject("not_paired")
         pinKey = HandshakeCrypto.pinKey(pin, transcript)
         phase = Phase.AUTH
         return PhoneHandshakeResult.Reply(
@@ -81,13 +82,19 @@ class PhoneHandshake(
         if (type != "auth") return reject("auth_expected")
         val proof = WearCrypto.fromB64(WearJson.string(message, "proof") ?: "") ?: return reject("proof")
         if (pairing) {
+            val currentPin = pairingPin() ?: return reject("not_paired")
             val key = pinKey ?: return reject("pin")
+            if (!WearCrypto.constantTimeEquals(key, HandshakeCrypto.pinKey(currentPin, transcript))) {
+                return reject("not_paired")
+            }
             val expected = HandshakeCrypto.pairProof(key, transcript)
-            if (!WearCrypto.constantTimeEquals(expected, proof)) return reject("bad_pin")
+            if (!WearCrypto.constantTimeEquals(expected, proof)) {
+                onPairingFailure()
+                return reject("bad_pin")
+            }
             val fresh = WearCrypto.random(WearCrypto.KEY_BYTES)
             sessionId = WearCrypto.random(16)
             psk = fresh
-            pinKey = null
             phase = Phase.CONFIRM
             return PhoneHandshakeResult.Reply(
                 listOf(
@@ -116,6 +123,14 @@ class PhoneHandshake(
     private fun confirm(message: JsonObject, type: String?): PhoneHandshakeResult {
         if (type != "confirm") return reject("confirm_expected")
         val proof = WearCrypto.fromB64(WearJson.string(message, "proof") ?: "") ?: return reject("proof")
+        if (pairing) {
+            val currentPin = pairingPin() ?: return reject("not_paired")
+            val key = pinKey ?: return reject("pin")
+            if (!WearCrypto.constantTimeEquals(key, HandshakeCrypto.pinKey(currentPin, transcript))) {
+                return reject("not_paired")
+            }
+            pinKey = null
+        }
         val expected = HandshakeCrypto.confirmProof(psk, transcript, sessionId)
         if (!WearCrypto.constantTimeEquals(expected, proof)) return reject("bad_confirm")
         phase = Phase.DONE
@@ -223,7 +238,7 @@ class WatchHandshake(
     }
 
     fun submitPin(pin: String): JsonObject? {
-        if (phase != Phase.PIN || pin.length < 4) return null
+        if (phase != Phase.PIN || !validPin(pin)) return null
         val key = HandshakeCrypto.pinKey(pin, transcript)
         pinKey = key
         phase = Phase.GRANT
@@ -294,3 +309,5 @@ class WatchHandshake(
         )
     }
 }
+
+private fun validPin(pin: String): Boolean = pin.length == 6 && pin.all { it in '0'..'9' }

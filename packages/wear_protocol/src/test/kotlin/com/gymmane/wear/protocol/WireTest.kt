@@ -8,6 +8,17 @@ import org.junit.Test
 
 class WireTest {
     @Test
+    fun maximumFrameSurvivesMinimumMtuAndReset() {
+        val payload = ByteArray(Wire.MAX_FRAME) { (it % 251).toByte() }
+        val encoded = Wire.encode(FrameKind.SECURE, payload)
+        val reader = FrameReader()
+        assertTrue(reader.feed(encoded.copyOfRange(0, 32)).isEmpty())
+        reader.reset()
+        val frames = Chunker.split(encoded, 20).flatMap(reader::feed)
+        assertArrayEquals(payload, frames.single().payload)
+    }
+
+    @Test
     fun gattChunksRespectAttributeLimitAtMaximumMtu() {
         assertEquals(20, Chunker.gattPayloadSize(23))
         assertEquals(244, Chunker.gattPayloadSize(247))
