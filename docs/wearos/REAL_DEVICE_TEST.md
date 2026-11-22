@@ -324,7 +324,12 @@ available).
    running, the watch should reconnect automatically using the existing pairing.
 3. Verify the current workout snapshot arrives again and that the phone still
    shows the one completed set.
-4. Leave the phone GymMane app open in the foreground for this initial test.
+4. With the watch Bluetooth still on, switch the phone's Bluetooth completely
+   off in Android settings. Check that GymMane on the watch shows the link as
+   offline. Switch the phone's Bluetooth on again while leaving both app
+   processes running. Check that the watch reconnects and receives the live
+   snapshot. Repeat once to catch stale GATT registrations or advertisements.
+5. Leave the phone GymMane app open in the foreground for the out-of-range test.
    Both apps now run an active-workout foreground service, but OEM background
    restrictions still differ by device; record what happens when the screen is
    off or the app is backgrounded instead of assuming either behavior.

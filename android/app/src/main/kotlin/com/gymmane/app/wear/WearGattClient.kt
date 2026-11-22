@@ -285,9 +285,9 @@ class WearGattClient(
     private fun scheduleRetry() {
         if (!wantConnected) return
         main.removeCallbacks(retry)
-        val delay = if (syncPending) min(4_000L, 450L shl min(retryAttempt, 4))
-            else min(30_000L, 1_000L shl min(retryAttempt, 5))
-        retryAttempt += 1
+        val delay = if (syncPending) min(4_000L, 450L shl retryAttempt)
+            else min(5_000L, 1_000L shl retryAttempt)
+        retryAttempt = (retryAttempt + 1).coerceAtMost(4)
         main.postDelayed(retry, delay)
     }
 

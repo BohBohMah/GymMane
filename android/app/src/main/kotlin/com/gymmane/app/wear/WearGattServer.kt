@@ -1,6 +1,7 @@
 package com.gymmane.app.wear
 
 import android.annotation.SuppressLint
+import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCharacteristic
@@ -53,7 +54,9 @@ class WearGattServer(
     private val manager = context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
 
     private var gattServer: BluetoothGattServer? = null
+    private var gattCallback: BluetoothGattServerCallback? = null
     private var advertiser: BluetoothLeAdvertiser? = null
+    private var advertiseCallback: AdvertiseCallback? = null
     private var rx: BluetoothGattCharacteristic? = null
     private var tx: BluetoothGattCharacteristic? = null
 
@@ -70,13 +73,32 @@ class WearGattServer(
     private val handshakeTimeout = Runnable {
         if (connected != null && session == null) fail("handshake_timeout")
     }
-    private var advertising = false
     private var serviceReady = false
     private var lastSnapshot: String? = null
     private var lastHomeSent: JsonObject? = null
     private var pendingHome: JsonObject? = null
     private var handlingCommands = 0
+    private var listeningForBluetooth = false
     private var listeningForUnlock = false
+    private val retryTransport = Runnable { start() }
+    private val registrationTimeout = Runnable {
+        if (gattServer != null && !serviceReady) recoverTransport()
+    }
+    private val bluetoothState = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            if (intent.action != BluetoothAdapter.ACTION_STATE_CHANGED || !prefs.serverEnabled) return
+            when (intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR)) {
+                BluetoothAdapter.STATE_TURNING_OFF, BluetoothAdapter.STATE_OFF -> {
+                    closeTransport()
+                    emit()
+                }
+                BluetoothAdapter.STATE_ON -> {
+                    closeTransport()
+                    start()
+                }
+            }
+        }
+    }
     private val phoneUnlock = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             if (intent.action == Intent.ACTION_USER_PRESENT && prefs.serverEnabled) {
@@ -94,24 +116,36 @@ class WearGattServer(
     private val pairingActive: Boolean
         get() = System.currentTimeMillis() < prefs.pairingUntil && prefs.pairingPin.isNotEmpty()
 
+    @SuppressLint("MissingPermission")
     fun start(): Boolean {
         if (!supported) {
             WearLinkDiagnostics.log("phone server start unsupported")
             return false
         }
-        val adapter = manager?.adapter ?: run {
+        val manager = manager ?: return false
+        val adapter = manager.adapter ?: run {
             WearLinkDiagnostics.log("phone server start no_adapter")
             return false
         }
+        if (!listenForBluetooth()) return false
+        main.removeCallbacks(retryTransport)
+        // Android invalidates the GATT server and advertiser when its radio is
+        // turned off. Keep observing the adapter so STATE_ON can recreate both.
         if (!adapter.isEnabled) {
-            WearLinkDiagnostics.log("phone server start bluetooth_off")
-            return false
+            closeTransport()
+            emit()
+            return true
         }
         if (gattServer != null) {
             if (serviceReady) advertise()
             return true
         }
-        val open = manager?.openGattServer(context, callback) ?: return false
+        val callback = newGattCallback()
+        val open = runCatching { manager.openGattServer(context, callback) }.getOrNull()
+        if (open == null) {
+            scheduleRetry()
+            return true
+        }
         val service = BluetoothGattService(WearUuids.SERVICE, BluetoothGattService.SERVICE_TYPE_PRIMARY)
         val write = BluetoothGattCharacteristic(
             WearUuids.RX,
@@ -132,14 +166,32 @@ class WearGattServer(
         notify.addDescriptor(cccd)
         service.addCharacteristic(write)
         service.addCharacteristic(notify)
-        if (!open.addService(service)) {
-            WearLinkDiagnostics.log("phone server add_service_failed")
-            open.close()
-            return false
-        }
         rx = write
         tx = notify
         gattServer = open
+        gattCallback = callback
+        if (!runCatching { open.addService(service) }.getOrDefault(false)) {
+            WearLinkDiagnostics.log("phone server add_service_failed")
+            recoverTransport()
+            return true
+        }
+        main.postDelayed(registrationTimeout, 5_000L)
+        WearLinkDiagnostics.log("phone server opened; waiting for service registration")
+        emit()
+        return true
+    }
+
+    private fun listenForBluetooth(): Boolean {
+        if (!listeningForBluetooth) {
+            listeningForBluetooth = runCatching {
+                // Android's Bluetooth process sends this protected broadcast.
+                ContextCompat.registerReceiver(
+                    context, bluetoothState, IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED),
+                    ContextCompat.RECEIVER_EXPORTED,
+                )
+            }.isSuccess
+        }
+        if (!listeningForBluetooth) return false
         if (!listeningForUnlock) {
             listeningForUnlock = runCatching {
                 ContextCompat.registerReceiver(
@@ -147,16 +199,26 @@ class WearGattServer(
                 )
             }.isSuccess
         }
-        WearLinkDiagnostics.log("phone server opened; waiting for service registration")
-        emit()
         return true
     }
 
     fun stop() {
+        if (listeningForBluetooth) {
+            context.unregisterReceiver(bluetoothState)
+            listeningForBluetooth = false
+        }
         if (listeningForUnlock) {
             context.unregisterReceiver(phoneUnlock)
             listeningForUnlock = false
         }
+        closeTransport()
+        emit()
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun closeTransport() {
+        main.removeCallbacks(retryTransport)
+        main.removeCallbacks(registrationTimeout)
         main.removeCallbacks(handshakeTimeout)
         stopAdvertising()
         session = null
@@ -168,15 +230,28 @@ class WearGattServer(
         sending = false
         closeAfterSend = false
         subscribed = false
-        val device = connected
         connected = null
-        if (device != null) runCatching { gattServer?.cancelConnection(device) }
-        runCatching { gattServer?.close() }
+        gattCallback = null
+        val server = gattServer
         gattServer = null
+        runCatching { server?.close() }
         serviceReady = false
         rx = null
         tx = null
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun scheduleRetry() {
+        main.removeCallbacks(retryTransport)
+        if (listeningForBluetooth && prefs.serverEnabled && manager?.adapter?.isEnabled == true) {
+            main.postDelayed(retryTransport, 2_000L)
+        }
+    }
+
+    private fun recoverTransport() {
+        closeTransport()
         emit()
+        scheduleRetry()
     }
 
     fun startPairing() {
@@ -201,11 +276,13 @@ class WearGattServer(
 
     @SuppressLint("MissingPermission")
     private fun advertise() {
-        if (!supported || !serviceReady || advertising || connected != null) return
+        if (!supported || !serviceReady || advertiseCallback != null || connected != null) return
         val adapter = manager?.adapter ?: return
         if (!adapter.isEnabled) return
-        val le = adapter.bluetoothLeAdvertiser ?: return
-        advertiser = le
+        val le = adapter.bluetoothLeAdvertiser ?: run {
+            scheduleRetry()
+            return
+        }
         val settings = AdvertiseSettings.Builder()
             .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
             .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_MEDIUM)
@@ -216,26 +293,29 @@ class WearGattServer(
             .addServiceUuid(ParcelUuid(WearUuids.SERVICE))
             .setIncludeDeviceName(false)
             .build()
-        advertising = true
+        val callback = newAdvertiseCallback()
+        advertiser = le
+        advertiseCallback = callback
         try {
-            le.startAdvertising(settings, data, advertiseCallback)
+            le.startAdvertising(settings, data, callback)
         } catch (_: Exception) {
-            advertising = false
+            stopAdvertising()
+            scheduleRetry()
         }
     }
 
     @SuppressLint("MissingPermission")
     private fun stopAdvertising() {
-        if (!advertising) return
-        advertising = false
-        runCatching { advertiser?.stopAdvertising(advertiseCallback) }
+        val callback = advertiseCallback ?: return
+        advertiseCallback = null
+        runCatching { advertiser?.stopAdvertising(callback) }
         advertiser = null
     }
 
-    private val advertiseCallback = object : AdvertiseCallback() {
+    private fun newAdvertiseCallback() = object : AdvertiseCallback() {
         override fun onStartSuccess(settingsInEffect: AdvertiseSettings?) {
             onMain {
-                advertising = true
+                if (advertiseCallback !== this) return@onMain
                 WearLinkDiagnostics.log("phone advertising started")
                 emit()
             }
@@ -243,7 +323,9 @@ class WearGattServer(
 
         override fun onStartFailure(errorCode: Int) {
             onMain {
-                advertising = false
+                if (advertiseCallback !== this) return@onMain
+                stopAdvertising()
+                scheduleRetry()
                 WearLinkDiagnostics.log("phone advertising failed code=$errorCode")
                 onEvent(statusMap() + ("error" to "advertise_$errorCode"))
             }
@@ -254,14 +336,15 @@ class WearGattServer(
         if (Looper.myLooper() == Looper.getMainLooper()) block() else main.post(block)
     }
 
-    private val callback = object : BluetoothGattServerCallback() {
+    private fun newGattCallback() = object : BluetoothGattServerCallback() {
         override fun onServiceAdded(status: Int, service: BluetoothGattService) {
             onMain {
-                if (service.uuid != WearUuids.SERVICE || gattServer == null) return@onMain
+                if (gattCallback !== this || service.uuid != WearUuids.SERVICE) return@onMain
+                main.removeCallbacks(registrationTimeout)
                 if (status != BluetoothGatt.GATT_SUCCESS) {
                     WearLinkDiagnostics.log("phone service registration failed status=$status")
                     onEvent(statusMap() + ("error" to "service_$status"))
-                    stop()
+                    recoverTransport()
                     return@onMain
                 }
                 serviceReady = true
@@ -272,6 +355,7 @@ class WearGattServer(
 
         override fun onConnectionStateChange(device: BluetoothDevice, status: Int, newState: Int) {
             onMain {
+                if (gattCallback !== this) return@onMain
                 WearLinkDiagnostics.log(
                     "phone GATT connection status=$status " +
                         "state=${if (newState == BluetoothProfile.STATE_CONNECTED) "connected" else "disconnected"}",
@@ -293,6 +377,7 @@ class WearGattServer(
             value: ByteArray,
         ) {
             onMain {
+                if (gattCallback !== this) return@onMain
                 if (device != connected || !subscribed || characteristic.uuid != WearUuids.RX ||
                     preparedWrite || offset != 0 || value.isEmpty() || value.size > 512
                 ) {
@@ -318,6 +403,7 @@ class WearGattServer(
             value: ByteArray,
         ) {
             onMain {
+                if (gattCallback !== this) return@onMain
                 val enabled = value.contentEquals(BluetoothGattDescriptor.ENABLE_INDICATION_VALUE)
                 val disabled = value.contentEquals(BluetoothGattDescriptor.DISABLE_NOTIFICATION_VALUE)
                 val valid = device == connected && descriptor.uuid == CCCD &&
@@ -338,16 +424,24 @@ class WearGattServer(
             offset: Int,
             characteristic: BluetoothGattCharacteristic,
         ) {
-            gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, offset, ByteArray(0))
+            onMain {
+                if (gattCallback === this) {
+                    gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, offset, ByteArray(0))
+                }
+            }
         }
 
         override fun onMtuChanged(device: BluetoothDevice, mtu: Int) {
-            onMain { if (device == connected) this@WearGattServer.mtu = mtu.coerceAtLeast(23) }
+            onMain {
+                if (gattCallback === this && device == connected) {
+                    this@WearGattServer.mtu = mtu.coerceAtLeast(23)
+                }
+            }
         }
 
         override fun onNotificationSent(device: BluetoothDevice, status: Int) {
             onMain {
-                if (device != connected) return@onMain
+                if (gattCallback !== this || device != connected) return@onMain
                 sending = false
                 WearLinkDiagnostics.log(
                     "phone indication completed status=$status remainingChunks=${queue.size}",
