@@ -8,6 +8,15 @@ import '../theme/app_theme.dart';
 import 'glass.dart';
 import 'ui_kit.dart';
 
+IconData setKindIcon(SetKind kind) => switch (kind) {
+      SetKind.warmup => PhosphorIconsFill.fire,
+      SetKind.normal => PhosphorIconsBold.barbell,
+      SetKind.drop => PhosphorIconsBold.arrowDown,
+      SetKind.failure => PhosphorIconsBold.warningCircle,
+      SetKind.restPause => PhosphorIconsBold.pause,
+      SetKind.cluster => PhosphorIconsBold.stack,
+    };
+
 Color setKindColor(GymColors gc, SetKind kind) => switch (kind) {
       SetKind.warmup => gc.warn,
       SetKind.drop => gc.info,

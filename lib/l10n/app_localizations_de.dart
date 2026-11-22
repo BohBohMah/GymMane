@@ -8258,11 +8258,11 @@ class AppLocalizationsDe extends AppLocalizations {
   }
 
   @override
-  String get wearLinkPhoneTitle => 'Smartwatch link';
+  String get wearLinkPhoneTitle => 'Wear OS watch';
 
   @override
   String get wearLinkPhoneBody =>
-      'Control the live workout from a paired Wear OS watch over local Bluetooth. Off by default. No internet, no account, no cloud.';
+      'Enable Bluetooth sync and open GymMane on your paired watch. Workouts move between devices over Bluetooth.';
 
   @override
   String get wearLinkPhoneEnable => 'Enable smartwatch link';

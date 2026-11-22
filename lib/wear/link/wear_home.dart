@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import '../../models/nutrition.dart';
 import '../../state/fit_state.dart';
 import 'wear_command.dart';
@@ -17,24 +19,57 @@ class WearHomePhone {
   Map<String, Object?> snapshot() {
     final now = clock();
     final today = state.routineOn(now);
-    final routines = [
-      for (final routine in state.routines.where((r) => state.routineExercises(r).isNotEmpty).take(40))
-        {'id': routine.id, 'name': _text(routine.name)},
-    ];
+    final routines = [...state.routines]
+      ..sort((a, b) => (a.id == today?.id ? 0 : 1).compareTo(b.id == today?.id ? 0 : 1));
+    final available = routines
+        .map((routine) => (routine, state.routineExercises(routine).length))
+        .where((entry) => entry.$2 > 0)
+        .take(40);
+    var draftBudget = 16000;
+    final routineRows = <Map<String, dynamic>>[];
+    for (final (routine, count) in available) {
+      final row = <String, dynamic>{'id': routine.id, 'name': _text(routine.name), 'count': count};
+      if (draftBudget > 0 && count <= 40) {
+        final draft = state.wearRoutineDraft(routine).toJson()..remove('sid');
+        for (final exercise in draft['ex'] as List) {
+          for (final set in (exercise as Map)['s'] as List) {
+            (set as Map).remove('sid');
+          }
+        }
+        final size = utf8.encode(jsonEncode(draft)).length;
+        if (size <= draftBudget) {
+          row['draft'] = draft;
+          draftBudget -= size;
+        }
+      }
+      routineRows.add(row);
+    }
     final plan = state.nutritionBeta ? state.planOn(now) : null;
     final logged = state.nutritionBeta ? state.entriesOn(now).map((entry) => entry.meal).toSet() : <Meal>{};
     return {
       'day': wearDayKey(now),
+      'language': state.language,
+      'training': {
+        'rest': state.restSeconds,
+        'mini': state.miniRestSeconds,
+        'change': state.changeRestSeconds,
+        'side': state.sideRestSeconds,
+        'effort': state.effortMode,
+        'units': state.units,
+        'distance': state.distanceUnit,
+        'stepKg': state.fromDisplayWeight(state.weightStep),
+      },
       'today': today != null && state.routineExercises(today).isNotEmpty
           ? {'id': today.id, 'name': _text(today.name)}
           : null,
-      'routines': routines,
+      'routines': routineRows,
       'custom': [
         for (final exercise in state.customExercises.where((e) => !state.isArchived(e.id)).take(30))
-          {'id': exercise.id, 'name': _text(exercise.name)},
+          {'id': exercise.id, 'name': _text(exercise.name), 'primary': exercise.primary},
       ],
       'weekDone': state.daysDoneThisWeek,
       'weekGoal': state.weeklyTarget,
+      'weekStartDay': state.weekStartDay,
       'streak': state.currentStreak,
       'nutrition': state.nutritionBeta,
       if (state.nutritionBeta) ...{

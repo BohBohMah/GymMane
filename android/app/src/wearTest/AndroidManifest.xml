@@ -43,9 +43,13 @@
     <uses-permission android:name="android.permission.health.READ_ACTIVE_CALORIES_BURNED" tools:node="remove" />
     <uses-permission android:name="android.permission.health.READ_WEIGHT" tools:node="remove" />
     <uses-permission android:name="android.permission.health.WRITE_EXERCISE" tools:node="remove" />
-    <!-- A test companion does not publish the standalone app's Wear surfaces. -->
+    <!-- The test companion publishes the tiles and complication backed by its paired phone. -->
     <application>
         <service android:name=".GymTileService" tools:node="remove" />
+        <service
+            android:name=".GymComplicationService"
+            android:label="@string/companion_workout_tile"
+            tools:replace="android:label" />
         <service
             android:name=".CompanionWorkoutTile"
             android:exported="true"
@@ -66,7 +70,6 @@
             </intent-filter>
             <meta-data android:name="androidx.wear.tiles.PREVIEW" android:resource="@drawable/tile_preview" />
         </service>
-        <service android:name=".GymComplicationService" tools:node="remove" />
         <receiver android:name=".HeatmapWidgetProvider" tools:node="remove" />
         <receiver android:name=".StatsWidgetProvider" tools:node="remove" />
         <receiver android:name=".BodyWidgetProvider" tools:node="remove" />

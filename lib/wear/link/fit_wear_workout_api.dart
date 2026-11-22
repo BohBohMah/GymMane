@@ -34,7 +34,8 @@ class FitWearWorkoutApi implements WearWorkoutApi {
   };
 
   @override
-  void adoptRest(DateTime endsAt, int totalSec) => fit.adoptRest(endsAt, totalSec);
+  void adoptRest(DateTime endsAt, int totalSec, {bool switchSides = false}) =>
+      fit.adoptRest(endsAt, totalSec, switchSides: switchSides);
 
   @override
   String get effortMode => fit.effortMode;
@@ -49,7 +50,8 @@ class FitWearWorkoutApi implements WearWorkoutApi {
   bool get hasData => fit.hasData;
 
   @override
-  void toggleSet(int exerciseIndex, int setIndex) => fit.toggleSet(exerciseIndex, setIndex);
+  void toggleSet(int exerciseIndex, int setIndex, {bool startRecovery = true}) =>
+      fit.toggleSet(exerciseIndex, setIndex, startRecovery: startRecovery);
 
   @override
   void setWeight(int exerciseIndex, int setIndex, double kg) =>

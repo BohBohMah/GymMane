@@ -14363,13 +14363,13 @@ abstract class AppLocalizations {
   /// No description provided for @wearLinkPhoneTitle.
   ///
   /// In en, this message translates to:
-  /// **'Smartwatch link'**
+  /// **'Wear OS watch'**
   String get wearLinkPhoneTitle;
 
   /// No description provided for @wearLinkPhoneBody.
   ///
   /// In en, this message translates to:
-  /// **'Control the live workout from a paired Wear OS watch over local Bluetooth. Off by default. No internet, no account, no cloud.'**
+  /// **'Enable Bluetooth sync and open GymMane on your paired watch. Workouts move between devices over Bluetooth.'**
   String get wearLinkPhoneBody;
 
   /// No description provided for @wearLinkPhoneEnable.

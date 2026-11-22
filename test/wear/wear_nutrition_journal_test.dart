@@ -20,6 +20,21 @@ void main() {
   WearCommand command(String id, String action, Map<String, dynamic> args) =>
       WearCommand(id: id, baseRev: 0, action: 'home/$action', args: {'day': day, ...args});
 
+  test('the cached weekly total observes the phone week start and never invents a streak', () async {
+    final journal = WearNutritionJournal(write: (_) async {});
+    await journal.rebase({
+      ...summary,
+      'weekDone': 2,
+      'weekGoal': 4,
+      'weekStartDay': DateTime.saturday,
+      'streak': 3,
+    }, 'phone');
+    expect(journal.view(today)!['streak'], 3);
+    expect(journal.view(DateTime(2026, 11, 20))!['weekDone'], 2);
+    expect(journal.view(DateTime(2026, 11, 20))!.containsKey('streak'), false);
+    expect(journal.view(DateTime(2026, 11, 21))!.containsKey('weekDone'), false);
+  });
+
   test('nutrition data, pending commands and exact undo survive app closure', () async {
     final dir = await Directory.systemTemp.createTemp('wear-nutrition-test');
     addTearDown(() => dir.delete(recursive: true));

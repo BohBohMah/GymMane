@@ -24,6 +24,7 @@ object WearLinkBridge {
     private var channel: MethodChannel? = null
     private var server: WearGattServer? = null
     private var client: WearGattClient? = null
+    private var clientSyncPending = false
     private var lastJson: String? = null
     private var workoutServiceActive = false
 
@@ -48,6 +49,12 @@ object WearLinkBridge {
                 "cancelPairing" -> result.success(cancelPairing())
                 "forget" -> result.success(forgetServer())
                 "status" -> result.success(serverStatus())
+                "wakeServer" -> {
+                    if (!isWatch() && prefs()?.serverEnabled == true && missing(true).isEmpty()) {
+                        server()?.start()
+                    }
+                    result.success(serverStatus())
+                }
                 "update" -> {
                     lastJson = call.argument<String>("json")
                     server?.updateSnapshot(lastJson ?: "")
@@ -104,6 +111,11 @@ object WearLinkBridge {
                 }
                 "requestState" -> {
                     client?.requestState()
+                    result.success(null)
+                }
+                "setSyncPending" -> {
+                    clientSyncPending = call.argument<Boolean>("pending") == true
+                    client?.setSyncPending(clientSyncPending)
                     result.success(null)
                 }
                 else -> result.notImplemented()
@@ -282,11 +294,16 @@ object WearLinkBridge {
 
     private fun startServer(): Map<String, Any?> {
         val store = prefs() ?: return unsupportedMap()
+        val enroll = !store.serverEnabled && store.keyCount() == 0
         store.serverEnabled = true
         val running = server()?.start() ?: false
         if (!running) {
             store.serverEnabled = false
             return serverStatus() + mapOf("error" to "start_failed")
+        }
+        if (enroll) {
+            store.newPairingPin()
+            server?.startPairing()
         }
         return serverStatus()
     }
@@ -404,13 +421,16 @@ object WearLinkBridge {
         client?.let { return it }
         val store = WearPrefs(current)
         val appContext = current.applicationContext
+        var latestTileState: Map<String, Any?>? = null
         val created = WearGattClient(
             context = appContext,
             prefs = store,
             onEvent = { event ->
+                if (event["state"] != "connected") latestTileState = null
                 channel?.invokeMethod("clientEvent", event)
             },
             onState = { state ->
+                latestTileState = state
                 CompanionTiles.save(appContext, state)
                 val status = state["status"] as? String
                 val active = status == "active" || status == "paused" || status == "parked"
@@ -432,13 +452,18 @@ object WearLinkBridge {
                     WearWorkoutService.stop(appContext)
                     workoutServiceActive = false
                 }
-                channel?.invokeMethod("state", state)
+                channel?.invokeMethod("state", state - "home")
+            },
+            onHome = { home ->
+                latestTileState?.let { CompanionTiles.save(appContext, it + ("home" to home)) }
+                channel?.invokeMethod("home", home)
             },
             onAck = { ack -> channel?.invokeMethod("ack", ack) },
             onPinRequired = { phoneName ->
                 channel?.invokeMethod("pinRequired", mapOf("phoneName" to phoneName))
             },
         )
+        created.setSyncPending(clientSyncPending)
         client = created
         return created
     }

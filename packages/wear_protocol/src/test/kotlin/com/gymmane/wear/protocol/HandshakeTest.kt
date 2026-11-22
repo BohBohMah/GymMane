@@ -10,6 +10,26 @@ import org.junit.Test
 
 class HandshakeTest {
     @Test
+    fun exchangeWithoutPinUsesAnExplicitTrustedBluetoothBond() {
+        var allowed = true
+        var phoneKey: ByteArray? = null
+        var watchKey: ByteArray? = null
+        val phone = PhoneHandshake("Phone", { null }, { null }, { _, _, key -> phoneKey = key },
+            allowBondedPairing = { allowed })
+        val watch = WatchHandshake("watch-1", "Watch", null, trustBluetoothBond = true) { watchKey = it }
+        val hello = phone.onMessage(watch.start()) as PhoneHandshakeResult.Reply
+        assertEquals(2, hello.messages.size)
+        assertTrue(watch.onMessage(hello.messages.first()) is WatchHandshakeResult.Reply)
+        val ready = watch.onMessage(hello.messages.last()) as WatchHandshakeResult.Ready
+        assertTrue(phone.onMessage(ready.confirm) is PhoneHandshakeResult.Established)
+        assertTrue(phoneKey!!.contentEquals(watchKey!!))
+        allowed = false
+        val closed = PhoneHandshake("Phone", { null }, { null }, { _, _, _ -> error("must not pair") },
+            allowBondedPairing = { allowed })
+        assertTrue((closed.onMessage(WatchHandshake("watch-2", "Watch", null) {}.start()) as PhoneHandshakeResult.Reply).close)
+    }
+
+    @Test
     fun canceledPairingCannotBeConfirmed() {
         var pin: String? = "123456"
         var stored = false

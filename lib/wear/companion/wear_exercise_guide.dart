@@ -21,6 +21,7 @@ Future<void> showWearExerciseGuide(
       final steps = exercise == null ? customSteps : exerciseSteps(exercise);
       final art = exercise?.art ?? '';
       final gc = context.gc;
+      final reduced = MediaQuery.disableAnimationsOf(context);
       return Scaffold(
         body: WearPage(
           scaleEdges: false,
@@ -32,12 +33,9 @@ Future<void> showWearExerciseGuide(
             ),
             if (art.isNotEmpty) ...[
               const SizedBox(height: 8),
-              ExerciseArt(
-                slug: art,
-                height: 112,
-                live: !MediaQuery.disableAnimationsOf(context),
-                loops: 3,
-                icon: sportIcon(id),
+              TickerMode(
+                enabled: !reduced,
+                child: ExerciseArt(slug: art, height: 112, live: !reduced, loops: 3, icon: sportIcon(id)),
               ),
             ],
             const SizedBox(height: 8),

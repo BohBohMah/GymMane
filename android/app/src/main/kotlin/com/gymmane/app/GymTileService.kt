@@ -17,7 +17,13 @@ import androidx.wear.tiles.TileBuilders
 import androidx.wear.tiles.TileService
 import com.google.common.util.concurrent.ListenableFuture
 
-class GymTileService : TileService() {
+open class GymTileService : TileService() {
+    protected open val openRoute = "play"
+    protected open val freshnessMillis = 0L
+    protected open fun readData(): WearData? = WearSurfaces.read(this)
+    protected open fun actionLabel(live: Boolean): Int = if (live) R.string.tile_continue else R.string.tile_start
+    protected open fun tileResources() = resources
+
     private val accent = 0xFFD9A184.toInt()
     private val ink = 0xFF0A0A0A.toInt()
     private val track = 0xFF262626.toInt()
@@ -27,10 +33,10 @@ class GymTileService : TileService() {
 
     override fun onTileRequest(requestParams: RequestBuilders.TileRequest): ListenableFuture<TileBuilders.Tile> =
         CallbackToFutureAdapter.getFuture { completer ->
-            val data = WearSurfaces.read(this)
+            val data = readData()
             val tile = TileBuilders.Tile.Builder()
                 .setResourcesVersion("1")
-                .setFreshnessIntervalMillis(0)
+                .setFreshnessIntervalMillis(freshnessMillis)
                 .setTileTimeline(TimelineBuilders.Timeline.fromLayoutElement(layout(data)))
                 .build()
             completer.set(tile)
@@ -89,7 +95,7 @@ class GymTileService : TileService() {
                             .setClassName(MainActivity::class.java.name)
                             .addKeyToExtraMapping(
                                 "gymmane_open",
-                                ActionBuilders.AndroidStringExtra.Builder().setValue("play").build()
+                                ActionBuilders.AndroidStringExtra.Builder().setValue(openRoute).build()
                             )
                             .build()
                     )
@@ -97,8 +103,8 @@ class GymTileService : TileService() {
             )
             .build()
 
-    private fun layout(d: WearData): LayoutElementBuilders.LayoutElement {
-        val frac = (d.done.toFloat() / d.goal).coerceIn(0f, 1f)
+    private fun layout(d: WearData?): LayoutElementBuilders.LayoutElement {
+        val frac = if (d == null) 0f else (d.done.toFloat() / d.goal).coerceIn(0f, 1f)
         val edge = LayoutElementBuilders.Box.Builder()
             .setWidth(expand())
             .setHeight(expand())
@@ -111,13 +117,8 @@ class GymTileService : TileService() {
             .apply { if (frac > 0f) addContent(arc(if (frac >= 1f) 359.9f else 360f * frac, accent)) }
             .build()
 
-        val score = LayoutElementBuilders.Row.Builder()
-            .setVerticalAlignment(LayoutElementBuilders.VERTICAL_ALIGN_BOTTOM)
-            .addContent(text("${d.done}", 44f, white, true))
-            .addContent(text("/${d.goal}", 22f, faint, true))
-            .build()
-
-        val label = if (d.live) getString(R.string.tile_continue) else getString(R.string.tile_start)
+        val localized = tileResources()
+        val label = localized.getString(actionLabel(d?.live == true))
         val pill = LayoutElementBuilders.Box.Builder()
             .setWidth(dp(118f))
             .setHeight(dp(44f))
@@ -140,15 +141,22 @@ class GymTileService : TileService() {
         val column = LayoutElementBuilders.Column.Builder()
             .setWidth(wrap())
             .setHorizontalAlignment(LayoutElementBuilders.HORIZONTAL_ALIGN_CENTER)
-        if (d.streak > 0) {
-            column.addContent(text(resources.getQuantityString(R.plurals.tile_streak, d.streak, d.streak), 12f, accent, true))
-            column.addContent(spacer(2f))
+        if (d != null) {
+            if (d.streak > 0) {
+                column.addContent(text(localized.getQuantityString(R.plurals.tile_streak, d.streak, d.streak), 12f, accent, true))
+                column.addContent(spacer(2f))
+            }
+            val score = LayoutElementBuilders.Row.Builder()
+                .setVerticalAlignment(LayoutElementBuilders.VERTICAL_ALIGN_BOTTOM)
+                .addContent(text("${d.done}", 44f, white, true))
+                .addContent(text("/${d.goal}", 22f, faint, true))
+                .build()
+            column.addContent(score)
+            column.addContent(text(localized.getString(R.string.tile_week), 12f, grey, false))
+            column.addContent(spacer(12f))
         }
-        column.addContent(score)
-        column.addContent(text(getString(R.string.tile_week), 12f, grey, false))
-        column.addContent(spacer(12f))
         column.addContent(pill)
-        if (d.next.isNotEmpty() && !d.live) {
+        if (d != null && d.next.isNotEmpty() && (!d.live || openRoute != "play")) {
             column.addContent(spacer(6f))
             column.addContent(
                 LayoutElementBuilders.Box.Builder()

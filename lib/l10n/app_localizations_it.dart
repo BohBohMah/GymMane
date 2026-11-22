@@ -8233,11 +8233,11 @@ class AppLocalizationsIt extends AppLocalizations {
   }
 
   @override
-  String get wearLinkPhoneTitle => 'Collegamento smartwatch';
+  String get wearLinkPhoneTitle => 'Orologio Wear OS';
 
   @override
   String get wearLinkPhoneBody =>
-      'Controlla l\'allenamento in corso da uno smartwatch Wear OS abbinato tramite Bluetooth locale. Disattivato per impostazione predefinita. Nessun internet, account o cloud.';
+      'Attiva la sincronizzazione Bluetooth e apri GymMane sull’orologio già abbinato. Gli allenamenti passano da un dispositivo all’altro via Bluetooth.';
 
   @override
   String get wearLinkPhoneEnable => 'Attiva collegamento smartwatch';

@@ -547,13 +547,24 @@ mixin WorkoutState on FitCore, SettingsState, LibraryState, PlacesState, StatsSt
       Set<String> chained = const {},
       String? routineId,
       DateTime? on}) {
-    final s = WorkoutSession()..routineId = routineId;
+    final s = _buildWorkout(exs, plan: plan, planned: planned, chained: chained, routineId: routineId);
     if (on != null) {
       s.loggedAt = DateTime(on.year, on.month, on.day, 12);
       s.manual = true;
     }
     logDay = null;
-    s.exercises = exs
+    if (deloadWeek && !s.manual) _lighten(s);
+    adoptWearWorkout(s, elapsed: 0, paused: false, restDuration: 0, countdown: startCountdown && !s.manual);
+  }
+
+  WorkoutSession _buildWorkout(List<Exercise> exercises, {
+    Map<String, int>? plan,
+    Map<String, List<PlannedSet>> planned = const {},
+    Set<String> chained = const {},
+    String? routineId,
+  }) => WorkoutSession()
+    ..routineId = routineId
+    ..exercises = exercises
         .map((ex) => SessionExercise(
               ex.id,
               ex.name,
@@ -562,16 +573,61 @@ mixin WorkoutState on FitCore, SettingsState, LibraryState, PlacesState, StatsSt
               linkedNext: chained.contains(ex.id),
             ))
         .toList();
-    if (deloadWeek && !s.manual) _lighten(s);
+
+  WorkoutSession wearRoutineDraft(Routine routine) {
+    final exercises = routineExercises(routine);
+    final draft = _buildWorkout(
+      exercises,
+      routineId: routine.id,
+      plan: {for (final ex in exercises) ex.id: routineSets(routine, ex.id)},
+      planned: {for (final ex in exercises) if (hasPlan(routine, ex.id)) ex.id: plannedSets(routine, ex.id)},
+      chained: {for (final ex in exercises) if (chainsToNext(routine, ex.id)) ex.id},
+    )..name = routine.name;
+    if (deloadWeek) _lighten(draft);
+    return draft;
+  }
+
+  SessionExercise wearExerciseDraft(Exercise exercise) =>
+      _buildWorkout([exercise]).exercises.single;
+
+  void adoptWearWorkout(WorkoutSession s, {
+    required int elapsed, required bool paused, required int restDuration, bool countdown = false,
+  }) {
     _restTimer?.cancel();
-    _elapsedBefore = 0;
-    sessionPaused = false;
+    _sessionTimer?.cancel();
+    _runningSince = null;
+    _elapsedBefore = elapsed;
+    sessionPaused = paused;
     sessionLocked = false;
-    countdownUntil = startCountdown && !s.manual ? DateTime.now().add(countdownLength) : null;
-    _startTicking(from: countdownUntil);
+    countdownUntil = countdown ? DateTime.now().add(countdownLength) : null;
+    if (!paused) _startTicking(from: countdownUntil);
     session = s;
     route = 'session';
+    restTotal = restDuration;
+    final restEndsAt = s.restEndsAt;
+    if (!paused && restEndsAt != null) adoptRest(restEndsAt, restDuration, switchSides: s.restSwitch);
     persistNow();
+    notifyListeners();
+  }
+
+  void logWearWorkout(WorkoutSession workout, int elapsed) {
+    final logged = [
+      for (final ex in workout.exercises)
+        if (ex.sets.any((set) => set.done))
+          LoggedExercise(ex.id, ex.name, ex.primary,
+              [for (final set in ex.sets) if (set.done) set.logged], incline: lastIncline(ex.id)),
+    ];
+    if (logged.isEmpty) return;
+    final entry = LoggedSession(workout.loggedAt ?? DateTime.now(), elapsed, logged,
+        routineId: workout.routineId, name: workout.name, deload: workout.deload);
+    sessions.add(entry);
+    sessions.sort((a, b) => a.date.compareTo(b.date));
+    _advanceRotation(entry.routineId, entry.date);
+    healthSave(entry);
+    persistNow();
+    refreshAwards();
+    _refreshWidgets();
+    syncTrainReminder();
     notifyListeners();
   }
 
@@ -804,13 +860,13 @@ mixin WorkoutState on FitCore, SettingsState, LibraryState, PlacesState, StatsSt
         isSidedReps(s.exercises[exIdx].id);
   }
 
-  void toggleSet(int exIdx, int setIdx) {
+  void toggleSet(int exIdx, int setIdx, {bool startRecovery = true}) {
     final st = session!.exercises[exIdx].sets[setIdx];
     _advanceTimer?.cancel();
     if (!st.done && !st.half && restsBetweenSides(exIdx, st)) {
       st.half = true;
       _persist();
-      startRest(seconds: sideRestSeconds, switchSides: true);
+      if (startRecovery) startRest(seconds: sideRestSeconds, switchSides: true);
       notifyListeners();
       return;
     }
@@ -821,12 +877,12 @@ mixin WorkoutState on FitCore, SettingsState, LibraryState, PlacesState, StatsSt
     if (!st.done) return;
     final chain = chainAt(exIdx);
     if (chain.length > 1) {
-      _advanceChain(chain, exIdx);
+      _advanceChain(chain, exIdx, startRecovery: startRecovery);
       return;
     }
     final sets = session!.exercises[exIdx].sets;
     final mini = setIdx + 1 < sets.length && const [SetKind.restPause, SetKind.cluster].contains(sets[setIdx + 1].kind);
-    startRest(mini: mini, seconds: st.rest ?? (mini ? null : _changeRestAfter(exIdx)));
+    if (startRecovery) startRest(mini: mini, seconds: st.rest ?? (mini ? null : _changeRestAfter(exIdx)));
     if (autoAdvance || sessionLocked) _advanceWhenDone(exIdx);
   }
 
@@ -986,7 +1042,7 @@ mixin WorkoutState on FitCore, SettingsState, LibraryState, PlacesState, StatsSt
 
   bool get inSuperset => chainAt(session?.currentIndex ?? -1).length > 1;
 
-  void _advanceChain(List<int> chain, int exIdx) {
+  void _advanceChain(List<int> chain, int exIdx, {bool startRecovery = true}) {
     final s = session!;
     final after = chain.where((i) => i > exIdx && s.exercises[i].hasUndone).toList();
     if (after.isNotEmpty) {
@@ -997,7 +1053,9 @@ mixin WorkoutState on FitCore, SettingsState, LibraryState, PlacesState, StatsSt
     }
     final left = chain.where((i) => s.exercises[i].hasUndone).toList();
     final next = pendingAfter(chain.last);
-    startRest(seconds: left.isEmpty && next != null && changeRestSeconds > 0 ? changeRestSeconds : null);
+    if (startRecovery) {
+      startRest(seconds: left.isEmpty && next != null && changeRestSeconds > 0 ? changeRestSeconds : null);
+    }
     if (left.isNotEmpty) {
       s.currentIndex = left.first;
     } else if ((autoAdvance || sessionLocked) && next != null) {
@@ -1207,13 +1265,14 @@ mixin WorkoutState on FitCore, SettingsState, LibraryState, PlacesState, StatsSt
   /// Continues a rest that began on the watch while the phone was offline.
   /// [endsAt] is the absolute deadline of the original rest, so replaying a
   /// completion mid-rest keeps the remaining time instead of restarting it.
-  void adoptRest(DateTime endsAt, int totalSec) {
+  void adoptRest(DateTime endsAt, int totalSec, {bool switchSides = false}) {
     final s = session;
     if (s == null) return;
     RestAlarm.instance.stopSound();
     final milliseconds = endsAt.difference(DateTime.now()).inMilliseconds;
     final left = milliseconds <= 0 ? 0 : (milliseconds / 1000).ceil();
     restTotal = totalSec > left ? totalSec : left;
+    s.restSwitch = left > 0 && switchSides;
     if (sessionPaused) {
       _restTimer?.cancel();
       s.restEndsAt = null;

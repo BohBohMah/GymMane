@@ -55,9 +55,10 @@ class WearCommandExecutor {
     final (exerciseIndex, setIndex) = explicit ?? _currentPending(session) ?? (-1, -1);
     if (exerciseIndex < 0) return WearExecution.noPending;
     final set = session.exercises[exerciseIndex].sets[setIndex];
-    if (set.done) return WearExecution.unchanged;
-    api.toggleSet(exerciseIndex, setIndex);
-    _adoptReplayedRest(args);
+    if (set.done || (set.half && args['firstSide'] == true)) return WearExecution.unchanged;
+    final rest = _replayedRest(args);
+    api.toggleSet(exerciseIndex, setIndex, startRecovery: rest == null && args['keepRest'] != true);
+    if (rest != null) api.adoptRest(rest.$1, rest.$2, switchSides: set.half);
     final updated = api.session;
     if (updated != null &&
         exerciseIndex == updated.currentIndex &&
@@ -72,20 +73,20 @@ class WearCommandExecutor {
   /// rest that already started on the watch. Adopting it keeps both devices at
   /// the same remaining time instead of restarting a full rest on the phone.
   ///
-  /// The watch also sends the seconds it had left, which is immune to clock
-  /// skew between the two devices. The absolute deadline is only a fallback.
-  void _adoptReplayedRest(Map<String, dynamic> args) {
-    final total = (args['restTotalSec'] as num?)?.toInt() ?? 0;
+  /// Prefer the original deadline so time spent sending the batch also counts.
+  /// Use the remaining duration if the two device clocks disagree.
+  (DateTime, int)? _replayedRest(Map<String, dynamic> args) {
+    final total = ((args['restTotalSec'] as num?)?.toInt() ?? 0).clamp(0, 3600);
     final sentRemaining = (args['restRemainingSec'] as num?)?.toInt();
-    if (sentRemaining != null) {
-      final left = sentRemaining.clamp(0, 3600);
-      api.adoptRest(DateTime.now().add(Duration(seconds: left)), total > left ? total : left);
-      return;
-    }
     final raw = args['restEndsAt'];
     final endsAt = raw is String ? DateTime.tryParse(raw) : null;
-    if (endsAt == null) return;
-    api.adoptRest(endsAt, total);
+    if (sentRemaining != null) {
+      final left = sentRemaining.clamp(0, 3600);
+      final fromRemaining = DateTime.now().add(Duration(seconds: left));
+      final matchingClocks = endsAt != null && endsAt.difference(fromRemaining).inMilliseconds.abs() <= 5000;
+      return (left > 0 && matchingClocks ? endsAt : fromRemaining, total > left ? total : left);
+    }
+    return endsAt == null ? null : (endsAt, total);
   }
 
   WearExecution _uncomplete(Map<String, dynamic> args) {

@@ -22,6 +22,7 @@ class FakeWearApi implements WearWorkoutApi {
   String effortMode = '';
   @override
   String workoutName = 'Push day';
+  bool? completionStartedRecovery;
 
   @override
   bool get complete => session?.complete ?? false;
@@ -112,7 +113,7 @@ class FakeWearApi implements WearWorkoutApi {
   Map<String, int> get restDefaults => const {'normal': 90, 'mini': 20, 'change': 0, 'side': 0};
 
   @override
-  void adoptRest(DateTime endsAt, int totalSec) {
+  void adoptRest(DateTime endsAt, int totalSec, {bool switchSides = false}) {
     adoptedRestEndsAt = endsAt;
     adoptedRestTotal = totalSec;
     session!.restEndsAt = endsAt;
@@ -132,7 +133,10 @@ class FakeWearApi implements WearWorkoutApi {
   void togglePause() => paused = !paused;
 
   @override
-  void toggleSet(int exercise, int set) => _set(exercise, set, (value) => value.done = !value.done);
+  void toggleSet(int exercise, int set, {bool startRecovery = true}) {
+    completionStartedRecovery = startRecovery;
+    _set(exercise, set, (value) => value.done = !value.done);
+  }
 }
 
 FakeWearApi apiWithSession({bool withRest = false}) {
@@ -290,7 +294,7 @@ void main() {
       expect(api.session!.exercises[0].sets[0].done, isTrue);
     });
 
-    test('prefers the remaining seconds sent by the watch over the deadline', () {
+    test('uses remaining seconds as fallback for a skewed watch clock', () {
       final api = apiWithSession();
       // A skewed deadline that would be far in the past must not win.
       final before = DateTime.now();
@@ -311,6 +315,21 @@ void main() {
       final endsAt = api.adoptedRestEndsAt!;
       expect(endsAt.difference(before).inSeconds, inInclusiveRange(29, 31));
       expect(api.adoptedRestTotal, 120);
+    });
+
+    test('keeps the exact watch deadline when the clocks agree', () {
+      final api = apiWithSession();
+      final endsAt = DateTime.now().add(const Duration(seconds: 88));
+      final result = WearCommandExecutor(api).execute(command('completeSet', args: {
+        'exerciseIndex': 0,
+        'setIndex': 0,
+        'restEndsAt': endsAt.toIso8601String(),
+        'restTotalSec': 120,
+        'restRemainingSec': 90,
+      }), 0);
+      expect(result.ok, isTrue);
+      expect(api.adoptedRestEndsAt, endsAt);
+      expect(api.completionStartedRecovery, isFalse);
     });
 
     test('an elapsed replayed rest is not restarted', () {

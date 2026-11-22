@@ -1,6 +1,9 @@
 package com.gymmane.app
 
+import android.content.ComponentName
 import android.content.Context
+import android.content.res.Configuration
+import android.content.res.Resources
 import androidx.concurrent.futures.CallbackToFutureAdapter
 import androidx.wear.protolayout.ActionBuilders
 import androidx.wear.protolayout.ColorBuilders.argb
@@ -14,9 +17,11 @@ import androidx.wear.protolayout.TimelineBuilders
 import androidx.wear.tiles.RequestBuilders
 import androidx.wear.tiles.TileBuilders
 import androidx.wear.tiles.TileService
+import androidx.wear.watchface.complications.datasource.ComplicationDataSourceUpdateRequester
 import com.google.common.util.concurrent.ListenableFuture
 import org.json.JSONObject
 import java.time.LocalDate
+import java.util.Locale
 
 /** Private, minimal projection of the last authenticated phone snapshot. */
 internal object CompanionTiles {
@@ -26,25 +31,67 @@ internal object CompanionTiles {
         if (BuildConfig.APPLICATION_ID != "com.gymmane.test.wear") return
         val home = state["home"] as? Map<*, *> ?: return
         val today = home["today"] as? Map<*, *>
+        val previous = workout(context)
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val oldLanguage = prefs.getString("language", null)
+        val language = (home["language"] as? String)?.let { if (it == "it") "it" else "en" } ?: oldLanguage
+        if (language != oldLanguage) prefs.edit().putString("language", language).apply()
         val active = state["status"] in listOf("active", "paused", "parked")
-        val workout = JSONObject()
+        val workoutSnapshot = JSONObject()
             .put("day", home["day"])
+            .put("language", language)
             .put("active", active)
             .put("title", if (active) state["name"] else today?.get("name"))
             .put("done", home["weekDone"])
             .put("goal", home["weekGoal"])
+            .put("streak", home["streak"])
         val water = JSONObject()
             .put("day", home["day"])
+            .put("language", language)
             .put("enabled", home["nutrition"])
             .put("ml", home["water"])
             .put("goal", home["waterGoal"])
-        store(context, "workout", workout.toString(), CompanionWorkoutTile::class.java)
+        store(context, "workout", workoutSnapshot.toString(), CompanionWorkoutTile::class.java)
         store(context, "water", water.toString(), CompanionWaterTile::class.java)
+        val current = workout(context)
+        if (previous?.done != current?.done || previous?.goal != current?.goal || language != oldLanguage) {
+            refreshComplication(context)
+        }
     }
 
     fun clear(context: Context) {
         store(context, "workout", "", CompanionWorkoutTile::class.java)
         store(context, "water", "", CompanionWaterTile::class.java)
+        refreshComplication(context)
+    }
+
+    fun workout(context: Context): WearData? {
+        val data = read(context, "workout")
+        val goal = data.optInt("goal")
+        if (goal <= 0 || !data.has("done")) return null
+        return WearData(
+            done = data.optInt("done").coerceAtLeast(0),
+            goal = goal,
+            streak = data.optInt("streak").coerceAtLeast(0),
+            next = data.optString("title"),
+            live = data.optBoolean("active"),
+        )
+    }
+
+    fun strings(context: Context): Resources {
+        val cached = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString("language", null)
+        val language = cached ?: context.resources.configuration.locales[0].language
+        val locale = if (language == "it") Locale.ITALIAN else Locale.ENGLISH
+        val configuration = Configuration(context.resources.configuration).apply { setLocale(locale) }
+        return context.createConfigurationContext(configuration).resources
+    }
+
+    private fun refreshComplication(context: Context) {
+        runCatching {
+            ComplicationDataSourceUpdateRequester
+                .create(context, ComponentName(context, GymComplicationService::class.java))
+                .requestUpdateAll()
+        }
     }
 
     fun read(context: Context, key: String): JSONObject {
@@ -61,10 +108,15 @@ internal object CompanionTiles {
     }
 }
 
-class CompanionWorkoutTile : CompanionTile("workout", "wear/workout")
-class CompanionWaterTile : CompanionTile("water", "wear/nutrition")
+class CompanionWorkoutTile : GymTileService() {
+    override val openRoute = "wear/workout"
+    override val freshnessMillis = 30 * 60 * 1000L
+    override fun readData() = CompanionTiles.workout(this)
+    override fun actionLabel(live: Boolean) = if (live) R.string.tile_continue else R.string.tile_open
+    override fun tileResources() = CompanionTiles.strings(this)
+}
 
-abstract class CompanionTile(private val key: String, private val route: String) : TileService() {
+class CompanionWaterTile : TileService() {
     override fun onTileRequest(requestParams: RequestBuilders.TileRequest): ListenableFuture<TileBuilders.Tile> =
         CallbackToFutureAdapter.getFuture { completer ->
             completer.set(TileBuilders.Tile.Builder()
@@ -72,7 +124,7 @@ abstract class CompanionTile(private val key: String, private val route: String)
                 .setFreshnessIntervalMillis(30 * 60 * 1000L)
                 .setTileTimeline(TimelineBuilders.Timeline.fromLayoutElement(layout()))
                 .build())
-            "gymmane-companion-$key"
+            "gymmane-companion-water"
         }
 
     override fun onTileResourcesRequest(
@@ -83,28 +135,17 @@ abstract class CompanionTile(private val key: String, private val route: String)
     }
 
     private fun layout(): LayoutElementBuilders.LayoutElement {
-        val data = CompanionTiles.read(this, key)
-        val water = key == "water"
-        val italian = resources.configuration.locales[0].language == "it"
-        val label = if (water) {
-            if (italian) "Acqua" else "Water"
-        } else {
-            if (italian) "Allenamento" else "Workout"
-        }
-        val detail = if (water && data.optBoolean("enabled")) {
+        val data = CompanionTiles.read(this, "water")
+        val localized = CompanionTiles.strings(this)
+        val label = localized.getString(R.string.tile_water_title)
+        val detail = if (data.optBoolean("enabled")) {
             "${data.optInt("ml")} / ${data.optInt("goal")} ml"
-        } else if (!water && data.has("done")) {
-            "${data.optInt("done")} / ${data.optInt("goal")} ${if (italian) "giorni" else "days"}"
         } else ""
-        val action = if (!water && data.optBoolean("active")) {
-            if (italian) "Riprendi" else "Resume"
-        } else if (italian) "Apri" else "Open"
+        val action = localized.getString(R.string.tile_open)
         val column = LayoutElementBuilders.Column.Builder()
             .setWidth(dp(138f))
             .setHorizontalAlignment(LayoutElementBuilders.HORIZONTAL_ALIGN_CENTER)
             .addContent(text(label, 14f, 0xFFD9A184.toInt()))
-        val title = data.optString("title")
-        if (title.isNotBlank()) column.addContent(text(title, 17f, 0xFFFFFFFF.toInt()))
         if (detail.isNotBlank()) column.addContent(text(detail, 16f, 0xFFFFFFFF.toInt()))
         column.addContent(LayoutElementBuilders.Spacer.Builder().setHeight(dp(12f)).build())
         column.addContent(
@@ -120,14 +161,14 @@ abstract class CompanionTile(private val key: String, private val route: String)
                             .setCorner(ModifiersBuilders.Corner.Builder().setRadius(dp(24f)).build())
                             .build())
                         .setClickable(ModifiersBuilders.Clickable.Builder()
-                            .setId(key)
+                            .setId("water")
                             .setOnClick(ActionBuilders.LaunchAction.Builder()
                                 .setAndroidActivity(ActionBuilders.AndroidActivity.Builder()
                                     .setPackageName(packageName)
                                     .setClassName(MainActivity::class.java.name)
                                     .addKeyToExtraMapping(
                                         "gymmane_open",
-                                        ActionBuilders.AndroidStringExtra.Builder().setValue(route).build(),
+                                        ActionBuilders.AndroidStringExtra.Builder().setValue("wear/nutrition").build(),
                                     )
                                     .build())
                                 .build())

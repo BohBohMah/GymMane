@@ -8,6 +8,7 @@ import '../../theme/app_colors.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/timer_panel.dart';
 import '../link/remote_workout.dart';
+import 'wear_motion.dart';
 
 class WearCompanionClock extends StatefulWidget {
   const WearCompanionClock({super.key, required this.workout});
@@ -70,29 +71,32 @@ class _WearCompanionClockState extends State<WearCompanionClock> with WidgetsBin
     final seconds = workout?.finished == true ? elapsed ?? workout!.elapsedSeconds : workout?.liveElapsedSeconds;
     final style = AppTheme.f(11, weight: FontWeight.w800, color: gc.textSecondary);
     return Padding(
-      padding: const EdgeInsets.only(top: 12),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Text(TimeOfDay.now().format(context), style: style),
-          if (workout?.hasWorkout == true && seconds != null) ...[
-            const SizedBox(width: 8),
-            Semantics(
-              label: t.duration,
-              child: Row(
-                children: [
-                  Icon(
-                    workout?.status == RemoteStatus.paused ? PhosphorIconsBold.pause : PhosphorIconsRegular.timer,
-                    color: gc.accent,
-                    size: 13,
-                  ),
-                  const SizedBox(width: 3),
-                  Text(clockLabel(seconds), style: style),
-                ],
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            WearRollingDigits(TimeOfDay.now().format(context), style: style, countsDown: false),
+            if (workout?.hasWorkout == true && seconds != null) ...[
+              const SizedBox(width: 8),
+              Semantics(
+                label: t.duration,
+                child: Row(
+                  children: [
+                    Icon(
+                      workout?.status == RemoteStatus.paused ? PhosphorIconsBold.pause : PhosphorIconsRegular.timer,
+                      color: gc.accent,
+                      size: 13,
+                    ),
+                    const SizedBox(width: 3),
+                    WearRollingDigits(clockLabel(seconds), style: style, countsDown: false),
+                  ],
+                ),
               ),
-            ),
+            ],
           ],
-        ],
+        ),
       ),
     );
   }

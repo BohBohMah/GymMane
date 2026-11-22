@@ -19,11 +19,7 @@ void main() {
               scaleEdges: false,
               children: [
                 const SizedBox(height: 190),
-                WearButton(
-                  label: 'Completa la serie in corso',
-                  filled: true,
-                  onTap: () => completed = true,
-                ),
+                WearButton(label: 'Completa la serie in corso', filled: true, onTap: () => completed = true),
               ],
             ),
           ),
@@ -62,6 +58,28 @@ void main() {
     WearRotary.turn(80);
     await tester.pumpAndSettle();
     expect(controller.offset, 138);
+    WearRotary.detach(controller);
+    await tester.pumpWidget(const SizedBox());
+    controller.dispose();
+  });
+
+  testWidgets('reduced motion applies crown steps immediately at the same sensitivity', (tester) async {
+    final controller = ScrollController();
+    WearRotary.attach(controller);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: MediaQuery(
+          data: const MediaQueryData(disableAnimations: true),
+          child: ListView(controller: controller, children: List.generate(40, (i) => const SizedBox(height: 48))),
+        ),
+      ),
+    );
+
+    WearRotary.turn(80);
+    expect(controller.offset, 28);
+    WearRotary.turn(-40);
+    expect(controller.offset, 14);
+
     WearRotary.detach(controller);
     await tester.pumpWidget(const SizedBox());
     controller.dispose();

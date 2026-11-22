@@ -11,6 +11,7 @@ class WearLinkStatus {
     this.pairingCode = '',
     this.pairingUntil,
     this.sdk = 0,
+    this.pairedCount = 0,
   });
 
   final bool supported;
@@ -22,6 +23,7 @@ class WearLinkStatus {
   final String pairingCode;
   final DateTime? pairingUntil;
   final int sdk;
+  final int pairedCount;
 
   bool get connected => state == WearLinkState.connected;
   bool get pairing => state == WearLinkState.pairing && pairingCode.isNotEmpty;
@@ -48,6 +50,7 @@ class WearLinkStatus {
       pairingCode: value['pairingCode'] as String? ?? '',
       pairingUntil: DateTime.tryParse(value['pairingUntil'] as String? ?? ''),
       sdk: (value['sdk'] as num?)?.toInt() ?? 0,
+      pairedCount: (value['pairedCount'] as num?)?.toInt() ?? 0,
     );
   }
 }

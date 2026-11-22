@@ -18,6 +18,7 @@ class PhoneHandshake(
     private val pairingPin: () -> String?,
     private val onPaired: (watchId: String, watchName: String, psk: ByteArray) -> Unit,
     private val onPairingFailure: () -> Unit = {},
+    private val allowBondedPairing: () -> Boolean = { false },
 ) {
     private enum class Phase { HELLO, AUTH, CONFIRM, DONE }
 
@@ -31,6 +32,7 @@ class PhoneHandshake(
     private var pinKey: ByteArray? = null
     private var sessionId = ByteArray(0)
     private var pairing = false
+    private var bondedPairing = false
 
     fun onMessage(message: JsonObject): PhoneHandshakeResult {
         val type = WearJson.string(message, "t")
@@ -69,6 +71,16 @@ class PhoneHandshake(
             return PhoneHandshakeResult.Reply(
                 listOf(HandshakeCrypto.phoneHello(phoneName, phoneNonce, "resume")),
             )
+        }
+        if (allowBondedPairing()) {
+            bondedPairing = true
+            psk = WearCrypto.random(WearCrypto.KEY_BYTES)
+            sessionId = WearCrypto.random(16)
+            phase = Phase.CONFIRM
+            return PhoneHandshakeResult.Reply(listOf(
+                HandshakeCrypto.phoneHello(phoneName, phoneNonce, "bonded"),
+                HandshakeCrypto.grant(psk, sessionId, HandshakeCrypto.readyProof(psk, transcript, sessionId)),
+            ))
         }
         if (pin == null || !validPin(pin)) return reject("not_paired")
         pinKey = HandshakeCrypto.pinKey(pin, transcript)
@@ -123,7 +135,9 @@ class PhoneHandshake(
     private fun confirm(message: JsonObject, type: String?): PhoneHandshakeResult {
         if (type != "confirm") return reject("confirm_expected")
         val proof = WearCrypto.fromB64(WearJson.string(message, "proof") ?: "") ?: return reject("proof")
-        if (pairing) {
+        if (bondedPairing) {
+            if (!allowBondedPairing()) return reject("not_paired")
+        } else if (pairing) {
             val currentPin = pairingPin() ?: return reject("not_paired")
             val key = pinKey ?: return reject("pin")
             if (!WearCrypto.constantTimeEquals(key, HandshakeCrypto.pinKey(currentPin, transcript))) {
@@ -166,6 +180,7 @@ class WatchHandshake(
     private val watchId: String,
     private val watchName: String,
     private val existingPsk: ByteArray?,
+    private val trustBluetoothBond: Boolean = false,
     private val onPaired: (ByteArray) -> Unit,
 ) {
     private enum class Phase { PHONE_HELLO, PIN, READY, GRANT, DONE }
@@ -179,6 +194,7 @@ class WatchHandshake(
     private var psk = ByteArray(0)
     private var sessionId = ByteArray(0)
     private var pairing = false
+    private var bondedPairing = false
 
     fun start(): JsonObject {
         watchNonce = WearCrypto.random(24)
@@ -219,6 +235,12 @@ class WatchHandshake(
         phoneNonce = nonce!!
         transcript = HandshakeCrypto.transcript(watchId, watchNonce, phoneNonce)
         when (WearJson.string(message, "mode")) {
+            "bonded" -> {
+                if (!trustBluetoothBond) return WatchHandshakeResult.Rejected("mode")
+                bondedPairing = true
+                phase = Phase.GRANT
+                return WatchHandshakeResult.Reply(emptyList())
+            }
             "pair" -> {
                 pairing = true
                 phase = Phase.PIN
@@ -274,7 +296,6 @@ class WatchHandshake(
     }
 
     private fun grant(message: JsonObject): WatchHandshakeResult {
-        val key = pinKey ?: return WatchHandshakeResult.Rejected("pin")
         val fresh = WearCrypto.fromB64(WearJson.string(message, "psk") ?: "")
             ?: return WatchHandshakeResult.Rejected("psk")
         val sid = WearCrypto.fromB64(WearJson.string(message, "sid") ?: "")
@@ -286,7 +307,10 @@ class WatchHandshake(
         sessionId = sid
         val proof = WearCrypto.fromB64(WearJson.string(message, "proof") ?: "")
             ?: return WatchHandshakeResult.Rejected("proof")
-        val expected = HandshakeCrypto.grantProof(key, transcript, fresh)
+        val expected = if (bondedPairing) HandshakeCrypto.readyProof(fresh, transcript, sid) else {
+            val key = pinKey ?: return WatchHandshakeResult.Rejected("pin")
+            HandshakeCrypto.grantProof(key, transcript, fresh)
+        }
         if (!WearCrypto.constantTimeEquals(expected, proof)) {
             return WatchHandshakeResult.Rejected("bad_grant")
         }

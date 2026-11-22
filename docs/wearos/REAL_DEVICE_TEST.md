@@ -218,21 +218,21 @@ shell if needed:
 
 1. Keep GymMane Test Phone open. Tap the bottom **Profile** (person) destination
    to open Settings.
-2. Open the **Smartwatch link** category.
+2. Open **Data & backup → Wear OS watch**.
 3. Tap **Enable smartwatch link**. Accept the Nearby devices prompt if shown.
    The status should say **Waiting for a paired watch**.
-4. Tap **PAIR A WATCH**. The phone shows a six-digit code and a two-minute
-   expiry. Keep that screen visible; do not share or photograph the code.
+4. The first activation opens a short enrollment window. If it expires, tap
+   **PAIR A WATCH** to reopen it.
 5. On the watch, tap **CONNECT PHONE**. The app loads the Android bonded-device
-   list. Select the HONOR phone by its displayed Bluetooth name, then enter the
-   current six-digit code and tap **CONFIRM**.
+   list. Select the HONOR phone by its displayed Bluetooth name. With current
+   APKs the app uses the existing Android Bluetooth bond to enroll without
+   typing a GymMane PIN.
 6. Expected: the phone status changes to **Connected to …**. With no active
    workout, the watch opens its Home with routines, exercise selection and
    Nutrition when enabled on the phone.
 
 The watch may show other bonded Bluetooth devices in the list. Choose only the
-HONOR. If the code expires, tap **PAIR A WATCH** again on the phone and enter
-the newly displayed code.
+HONOR.
 
 ## 9. Create a fictional workout and test synchronization
 
@@ -258,6 +258,20 @@ workout fictional; do not use or import personal GymMane data.
 
 Do not finish or save a real workout from the production GymMane app as part of
 this test.
+
+### Start on the watch while offline
+
+1. Sync a routine to the watch. Turn off Bluetooth and start it on the watch,
+   or select catalogue exercises and start them without a cached routine.
+2. Complete a set, edit the next set and pause during rest. Close and reopen
+   the watch app. Restore Bluetooth and compare the set values, current
+   exercise, paused state and remaining rest on both devices.
+3. Save a second workout offline and start another. After reconnecting, check
+   that the completed workout appears once in phone history. If the phone has
+   its own active session, verify it remains intact.
+4. Change the phone app language to Italian, English and a third language,
+   syncing after each change. The watch should use Italian, English and
+   English respectively and retain the last choice when opened offline.
 
 ## 10. Test the rest timer and duplicate protection
 
@@ -366,9 +380,16 @@ unmark it, or undo the last glass logged on the watch. Restore Bluetooth and
 check the phone diary and supplement inventory for duplicates. If Wear OS
 terminated the watch app, reopen it to resume syncing.
 
-On the watch face add **GymMane · Workout** and **GymMane · Water**. Check each
-tile opens the matching app screen. During a workout, check the ongoing
-activity shows the GymMane runner and opens the session when tapped.
+On the watch face add **GymMane · Workout**, **GymMane · Water**, and the GymMane
+complication if the face supports it. Check the workout tile shows the phone's
+weekly goal and streak and that the complication matches the weekly score. Open
+each shortcut and verify it leads to the corresponding companion screen.
+
+During a workout, check the ongoing activity shows the GymMane runner and opens
+the session. With Bluetooth off, complete a set and check that the outer ring
+tracks the remaining rest. Pause and resume the clock, then tap a completed set's
+green capsule to undo it. Restore Bluetooth and compare the final set states on
+both devices.
 
 Do this after installation, ADB setup and the initial pairing:
 

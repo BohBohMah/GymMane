@@ -81,7 +81,7 @@ class WearSnapshotBuilder {
     final endsAt = session.restEndsAt;
     if (frozen == null && endsAt == null) return null;
     return {
-      if (endsAt != null) 'endsAt': endsAt.toIso8601String(),
+      if (endsAt != null) 'endsAt': endsAt.toUtc().toIso8601String(),
       'frozenSec': ?frozen,
       'totalSec': api.restTotal,
       'switchSides': session.restSwitch,

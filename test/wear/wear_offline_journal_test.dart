@@ -258,7 +258,7 @@ void main() {
     final state = journal.state!;
     final rest = (state['snapshot'] as Map)['rest'] as Map;
     expect(rest['totalSec'], 120);
-    expect(DateTime.parse(rest['endsAt'] as String), now.add(const Duration(seconds: 120)));
+    expect(DateTime.parse(rest['endsAt'] as String), now.toUtc().add(const Duration(seconds: 120)));
     final stored = (state['pending'] as List).single as Map;
     expect((stored['args'] as Map)['restEndsAt'], rest['endsAt']);
     expect((stored['args'] as Map)['restTotalSec'], 120);
@@ -284,6 +284,33 @@ void main() {
     expect(endsAt.difference(now).inSeconds, 30);
     final stored = (state['pending'] as List).single as Map;
     expect((stored['args'] as Map)['restEndsAt'], rest['endsAt']);
+  });
+
+  test('an expired watch recovery does not reappear from an older phone snapshot', () async {
+    var now = DateTime.utc(2026, 11, 22, 15);
+    final journal = WearOfflineJournal(write: (_) async {}, clock: () => now);
+    await journal.initialize(restSnapshot());
+    await journal.apply(completeOperation('rest-one'));
+    now = now.add(const Duration(minutes: 3));
+    final phone = restSnapshot()..['rest'] = {
+      'endsAt': now.add(const Duration(seconds: 70)).toIso8601String(),
+      'totalSec': 120,
+    };
+    await journal.rebase(phone);
+    expect(journal.snapshot!['rest'], isNull);
+    expect((journal.pendingOperations(1).single['args'] as Map)['restTotalSec'], 120);
+  });
+
+  test('a matching completion already on the phone keeps the phone recovery', () async {
+    final now = DateTime.utc(2026, 11, 22, 15);
+    final journal = WearOfflineJournal(write: (_) async {}, clock: () => now);
+    await journal.initialize(restSnapshot());
+    await journal.apply(completeOperation('rest-one'));
+    final phoneRest = {'endsAt': now.add(const Duration(seconds: 45)).toIso8601String(), 'totalSec': 120};
+    final phone = restSnapshot()..['rest'] = phoneRest;
+    (((phone['exercises'] as List)[0] as Map)['sets'] as List)[0]['done'] = true;
+    await journal.rebase(phone);
+    expect(journal.snapshot!['rest'], phoneRest);
   });
 
   test('uses explicit set rest, mini rest and change rest when present', () async {

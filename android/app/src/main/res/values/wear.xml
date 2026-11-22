@@ -4,6 +4,9 @@
     <string name="tile_week">this week</string>
     <string name="tile_start">Start</string>
     <string name="tile_continue">Continue</string>
+    <string name="tile_open">Open</string>
+    <string name="tile_water_title">Water</string>
+    <string name="tile_live_workout">Workout in progress</string>
     <plurals name="tile_streak">
         <item quantity="one">%d day streak</item>
         <item quantity="other">%d day streak</item>

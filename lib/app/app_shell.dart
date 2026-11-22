@@ -48,6 +48,7 @@ import '../services/supplement_reminder.dart';
 import '../state/fit_state.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
+import '../wear/link/wear_link_server.dart';
 import '../widgets/nfc_sheet.dart';
 import '../widgets/app_background.dart';
 import '../widgets/award_celebration.dart';
@@ -382,6 +383,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver, Single
     }
     if (state == AppLifecycleState.paused) AutoBackup.instance.onLeave();
     if (state == AppLifecycleState.resumed) {
+      unawaited(WearLinkServer.instance.resume());
       fit.rollNutritionDay();
       NutritionWidgets.takePending();
       SupplementReminder.instance.takePending();

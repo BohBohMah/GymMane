@@ -14,20 +14,25 @@ import androidx.wear.watchface.complications.datasource.ComplicationRequest
 import androidx.wear.watchface.complications.datasource.ComplicationDataSourceService
 
 class GymComplicationService : ComplicationDataSourceService() {
+    private val companion get() = BuildConfig.APPLICATION_ID == "com.gymmane.test.wear"
     override fun getPreviewData(type: ComplicationType): ComplicationData? = build(type, WearData(3, 4, 0, "", false))
 
     override fun onComplicationRequest(request: ComplicationRequest, listener: ComplicationRequestListener) {
-        listener.onComplicationData(build(request.complicationType, WearSurfaces.read(this)))
+        val data = if (companion) CompanionTiles.workout(this) else WearSurfaces.read(this)
+        listener.onComplicationData(if (data != null) build(request.complicationType, data) else NoDataComplicationData())
     }
 
     private fun build(type: ComplicationType, d: WearData): ComplicationData? {
         val text = PlainComplicationText.Builder("${d.done}/${d.goal}").build()
-        val description = PlainComplicationText.Builder(getString(R.string.tile_week)).build()
+        val localized = if (companion) CompanionTiles.strings(this) else resources
+        val description = PlainComplicationText.Builder(localized.getString(R.string.tile_week)).build()
         val image = MonochromaticImage.Builder(Icon.createWithResource(this, R.drawable.ic_complication)).build()
         val tap = PendingIntent.getActivity(
             this,
             0,
-            Intent(this, MainActivity::class.java).putExtra("gymmane_open", "play"),
+            Intent(this, MainActivity::class.java)
+                .setAction("com.gymmane.app.wear.OPEN_WEEKLY_PROGRESS")
+                .putExtra("gymmane_open", if (companion) "wear/workout" else "play"),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
         return when (type) {

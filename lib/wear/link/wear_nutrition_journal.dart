@@ -78,9 +78,18 @@ class WearNutritionJournal {
     if (base == null) return null;
     final view = _copy(base);
     final day = wearDayKey(now);
-    final fresh = day == view['day'];
+    final snapshotDay = view['day'];
+    final fresh = day == snapshotDay;
     view['day'] = day;
     if (!fresh) {
+      final cachedDate = snapshotDay is String ? DateTime.tryParse(snapshotDay) : null;
+      final firstWeekday = view['weekStartDay'];
+      if (cachedDate == null || cachedDate.isAfter(now) || firstWeekday is! int ||
+          firstWeekday < DateTime.monday || firstWeekday > DateTime.sunday ||
+          cachedDate.isBefore(DateTime(now.year, now.month, now.day - (now.weekday - firstWeekday) % 7))) {
+        view.remove('weekDone');
+      }
+      view.remove('streak');
       view.remove('today');
       view.remove('plan');
       view.remove('planName');

@@ -43,6 +43,12 @@ class WearRotary {
     final step = (delta * _sensitivity).clamp(-64.0, 64.0);
     final target = (current + step).clamp(p.minScrollExtent, p.maxScrollExtent).toDouble();
     if (target == current) return;
+    final media = p.context.notificationContext?.getInheritedWidgetOfExactType<MediaQuery>()?.data;
+    if (media?.disableAnimations == true) {
+      _targets.remove(c);
+      c.jumpTo(target);
+      return;
+    }
     _targets[c] = target;
     c.animateTo(target, duration: const Duration(milliseconds: 140), curve: Curves.easeOutCubic)
         .whenComplete(() {
@@ -223,7 +229,7 @@ class _WearShellState extends State<WearShell> with WidgetsBindingObserver {
                       child: AnimatedSwitcher(
                         duration: const Duration(milliseconds: 260),
                         child: fit.route == 'session' && !_dim && _edgeValue() != null
-                            ? _EdgeRing(key: const ValueKey('edge'), value: _edgeValue()!)
+                            ? WearEdgeRing(key: const ValueKey('edge'), value: _edgeValue()!)
                             : const SizedBox.shrink(),
                       ),
                     ),
@@ -269,17 +275,18 @@ class _WearShellState extends State<WearShell> with WidgetsBindingObserver {
   }
 }
 
-class _EdgeRing extends StatelessWidget {
-  const _EdgeRing({super.key, required this.value});
+class WearEdgeRing extends StatelessWidget {
+  const WearEdgeRing({super.key, required this.value, this.duration = const Duration(seconds: 1)});
 
   final double value;
+  final Duration duration;
 
   @override
   Widget build(BuildContext context) {
     final gc = context.gc;
     return TweenAnimationBuilder<double>(
       tween: Tween(end: value),
-      duration: const Duration(milliseconds: 1000),
+      duration: MediaQuery.disableAnimationsOf(context) ? Duration.zero : duration,
       curve: Curves.linear,
       builder: (context, v, _) => SizedBox.expand(
         child: RepaintBoundary(
@@ -372,10 +379,11 @@ class _WearClockState extends State<WearClock> {
 }
 
 class WearPage extends StatefulWidget {
-  const WearPage({super.key, required this.children, this.scaleEdges = true});
+  const WearPage({super.key, required this.children, this.scaleEdges = true, this.topPadding});
 
   final List<Widget> children;
   final bool scaleEdges;
+  final double? topPadding;
 
   @override
   State<WearPage> createState() => _WearPageState();
@@ -405,7 +413,7 @@ class _WearPageState extends State<WearPage> {
         if (!widget.scaleEdges || MediaQuery.disableAnimationsOf(context)) {
           return ListView(
             controller: _scroll,
-            padding: EdgeInsets.fromLTRB(side, box.maxHeight * 0.14, side, box.maxHeight * 0.19),
+            padding: EdgeInsets.fromLTRB(side, widget.topPadding ?? box.maxHeight * 0.14, side, box.maxHeight * 0.19),
             children: widget.children,
           );
         }
@@ -428,7 +436,7 @@ class _WearPageState extends State<WearPage> {
           child: ListView(
             controller: _scroll,
             physics: const BouncingScrollPhysics(),
-            padding: EdgeInsets.fromLTRB(side, box.maxHeight * 0.17, side, box.maxHeight * 0.24),
+            padding: EdgeInsets.fromLTRB(side, widget.topPadding ?? box.maxHeight * 0.17, side, box.maxHeight * 0.24),
             children: [for (final c in widget.children) _EdgeScale(child: c)],
           ),
         );
@@ -492,30 +500,7 @@ class WearHome extends StatelessWidget {
     final canStart = planned != null && planned.exerciseIds.isNotEmpty;
     return WearPage(
       children: [
-        Center(
-          child: _WeekRing(gc: gc, done: fit.daysDoneThisWeek, goal: fit.weeklyTarget),
-        ),
-        if (fit.currentStreak > 0) ...[
-          const SizedBox(height: 8),
-          Center(
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(PhosphorIconsFill.fire, size: 14, color: gc.accent),
-                const SizedBox(width: 4),
-                Text(
-                  '${fit.currentStreak}',
-                  style: AppTheme.f(15, weight: FontWeight.w700, color: gc.text),
-                ),
-                const SizedBox(width: 4),
-                Text(
-                  t.daysUnit(fit.currentStreak),
-                  style: AppTheme.f(12, weight: FontWeight.w500, color: gc.textSecondary),
-                ),
-              ],
-            ),
-          ),
-        ],
+        WearWeekProgress(done: fit.daysDoneThisWeek, goal: fit.weeklyTarget, streak: fit.currentStreak),
         const SizedBox(height: 12),
         WearButton(
           label: live ? t.continueBtn : t.startWorkout,
@@ -556,37 +541,61 @@ class WearHome extends StatelessWidget {
   }
 }
 
-class _WeekRing extends StatelessWidget {
-  const _WeekRing({required this.gc, required this.done, required this.goal});
+class WearWeekProgress extends StatelessWidget {
+  const WearWeekProgress({super.key, required this.done, required this.goal, required this.streak});
 
-  final GymColors gc;
   final int done;
   final int goal;
+  final int streak;
 
   @override
   Widget build(BuildContext context) {
+    final gc = context.gc;
     final pct = goal <= 0 ? 0.0 : (done / goal).clamp(0.0, 1.0);
-    return SizedBox(
-      width: 80,
-      height: 80,
-      child: CustomPaint(
-        painter: _RingPainter(track: gc.bgRaised2, fill: gc.accent, pct: pct),
-        child: Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                '$done/$goal',
-                style: AppTheme.f(20, weight: FontWeight.w800, color: gc.text),
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        SizedBox.square(
+          dimension: 76,
+          child: CustomPaint(
+            painter: _RingPainter(track: gc.bgRaised2, fill: gc.accent, pct: pct),
+            child: Center(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text('$done/$goal', style: AppTheme.f(21, weight: FontWeight.w800, color: gc.text)),
+                ),
               ),
-              Text(
-                t.thisWeek,
-                style: AppTheme.f(9, weight: FontWeight.w700, color: gc.textTertiary, letterSpacing: 0.8),
-              ),
-            ],
+            ),
           ),
         ),
-      ),
+        const SizedBox(height: 5),
+        Text(
+          t.thisWeekTitle,
+          textAlign: TextAlign.center,
+          style: AppTheme.f(11.5, weight: FontWeight.w600, color: gc.textSecondary),
+        ),
+        if (streak > 0) ...[
+          const SizedBox(height: 5),
+          Semantics(
+            label: t.streakDays(streak),
+            excludeSemantics: true,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(PhosphorIconsFill.fire, size: 14, color: gc.accent),
+                const SizedBox(width: 5),
+                Text('$streak', style: AppTheme.f(15, weight: FontWeight.w800, color: gc.text)),
+                const SizedBox(width: 4),
+                Flexible(
+                  child: Text(t.daysUnit(streak), style: AppTheme.f(12, color: gc.textSecondary)),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ],
     );
   }
 }
@@ -881,7 +890,7 @@ class WearSettings extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: 8),
-                  _Switch(on: fit.keepScreenOn),
+                  WearSwitchIndicator(on: fit.keepScreenOn),
                 ],
               ),
             ),
@@ -908,8 +917,8 @@ class WearSettings extends StatelessWidget {
   );
 }
 
-class _Switch extends StatelessWidget {
-  const _Switch({required this.on});
+class WearSwitchIndicator extends StatelessWidget {
+  const WearSwitchIndicator({super.key, required this.on});
 
   final bool on;
 
@@ -917,7 +926,7 @@ class _Switch extends StatelessWidget {
   Widget build(BuildContext context) {
     final gc = context.gc;
     return AnimatedContainer(
-      duration: const Duration(milliseconds: 180),
+      duration: MediaQuery.disableAnimationsOf(context) ? Duration.zero : const Duration(milliseconds: 180),
       width: 38,
       height: 22,
       padding: const EdgeInsets.all(3),

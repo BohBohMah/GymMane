@@ -136,8 +136,6 @@ class SettingsScreen extends StatelessWidget {
 
   List<Widget> _sectionBody(BuildContext context, GymColors gc, String id) {
     switch (id) {
-      case 'wear':
-        return [const WearLinkSettings()];
       case 'general':
         return [
           _card(gc, [
@@ -807,10 +805,11 @@ class SettingsScreen extends StatelessWidget {
               (PhosphorIconsRegular.downloadSimple, t.importBackup, () => _importBackup(context)),
               if (AutoBackup.instance.supported)
                 (PhosphorIconsRegular.clockCounterClockwise, t.autoBackup, () => showAutoBackupSheet(context)),
+              (PhosphorIconsRegular.watch, t.wearLinkPhoneTitle, () => WearLinkSettings.show(context)),
               (PhosphorIconsRegular.export, t.stravaRow, () => showStravaSheet(context)),
               (PhosphorIconsRegular.barbell, t.clearWorkouts, () => _clearWorkouts(context)),
               (PhosphorIconsRegular.trash, t.resetData, () => _resetAll(context)),
-          ], danger: AutoBackup.instance.supported ? 6 : 5),
+          ], danger: AutoBackup.instance.supported ? 7 : 6),
         ];
       default:
         return [
@@ -865,7 +864,6 @@ class SettingsScreen extends StatelessWidget {
         'home' => t.sectionHome,
         'widgets' => t.sectionWidgets,
         'beta' => t.sectionBeta,
-        'wear' => t.wearLinkPhoneTitle,
         'data' => t.sectionData,
         'about' => t.aboutGymmane,
         _ => titleCase(t.support),
@@ -945,9 +943,6 @@ class SettingsScreen extends StatelessWidget {
       _Category('beta', PhosphorIconsRegular.flask, _sectionTitle('beta'), [
         (t.nutritionBeta, PhosphorIconsRegular.forkKnife),
       ]),
-      _Category('wear', PhosphorIconsRegular.watch, _sectionTitle('wear'), [
-        (t.wearLinkPhoneTitle, PhosphorIconsRegular.watch),
-      ]),
       _Category('data', PhosphorIconsRegular.database, _sectionTitle('data'), [
         (t.exportCsv, PhosphorIconsRegular.fileCsv),
         (t.reportTitle, PhosphorIconsRegular.fileText),
@@ -955,6 +950,7 @@ class SettingsScreen extends StatelessWidget {
         (t.importBackup, PhosphorIconsRegular.downloadSimple),
         (t.autoBackup, PhosphorIconsRegular.clockCounterClockwise),
         (t.importFromApp, PhosphorIconsRegular.arrowSquareIn),
+        (t.wearLinkPhoneTitle, PhosphorIconsRegular.watch),
         (t.stravaRow, PhosphorIconsRegular.export),
         (t.clearWorkouts, PhosphorIconsRegular.barbell),
         (t.resetData, PhosphorIconsRegular.trash),
@@ -2735,7 +2731,7 @@ class _SettingsHomeState extends State<_SettingsHome> {
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
                             for (final (g, label) in [
-                              (const {'general', 'training', 'alerts', 'wear'}, t.settingsGroupApp),
+                              (const {'general', 'training', 'alerts'}, t.settingsGroupApp),
                               (const {'home', 'widgets', 'beta'}, t.settingsGroupHome),
                               (const {'data', 'support', 'about'}, t.settingsGroupData),
                             ]) ...[

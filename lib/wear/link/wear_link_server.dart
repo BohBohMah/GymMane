@@ -14,6 +14,7 @@ import 'wear_home.dart';
 import 'wear_link_diagnostics.dart';
 import 'wear_link_status.dart';
 import 'wear_snapshot.dart';
+import 'wear_workout_handoff.dart';
 
 class WearLinkServer {
   WearLinkServer._();
@@ -142,6 +143,8 @@ class WearLinkServer {
       final execution = fit.applyWearTransaction(() {
         final execution = command.action.startsWith('home/')
             ? _home.execute(command)
+            : const {'adoptWorkout', 'uploadCompletedWorkout'}.contains(command.action)
+                ? _adoptWorkout(command)
             : command.action == 'syncBatch'
                 ? _executeBatch(command)
                 : _executor.execute(command, _rev);
@@ -176,6 +179,30 @@ class WearLinkServer {
         _push();
       }
     }
+  }
+
+  WearExecution _adoptWorkout(WearCommand command) {
+    final payload = readWearHandoff(command.args, command.workoutId, DateTime.now());
+    if (payload == null) return WearExecution.invalid;
+    if (command.action == 'uploadCompletedWorkout') {
+      if (!payload.save) return WearExecution.invalid;
+      fit.logWearWorkout(payload.session, payload.elapsed);
+      return WearExecution.changedOk;
+    }
+    final current = fit.session;
+    if (current != null) {
+      return current.sessionId == command.workoutId
+          ? WearExecution.unchanged
+          : const WearExecution(ok: false, code: 'active_session');
+    }
+    fit.adoptWearWorkout(
+      payload.session, elapsed: payload.elapsed, paused: payload.paused, restDuration: payload.rest,
+    );
+    if (payload.save) {
+      fit.finishSession(elapsedOverride: payload.elapsed);
+      fit.saveAndExit();
+    }
+    return WearExecution.changedOk;
   }
 
   WearExecution _executeBatch(WearCommand batch) {
@@ -321,6 +348,19 @@ class WearLinkServer {
     return next;
   }
 
+  Future<void> resume() async {
+    if (!_supported || !fit.wearLink) return;
+    try {
+      final next = WearLinkStatus.fromMap(await _channel.invokeMethod<Map>('wakeServer'));
+      status.value = next;
+      if (next.enabled) await _push();
+    } on PlatformException {
+      // Resume must remain usable while Bluetooth is off or permission changed.
+    } on MissingPluginException {
+      // Older host builds lack the screen-resume hook.
+    }
+  }
+
   Future<Map<dynamic, dynamic>?> _readStatus() async {
     try {
       return await _channel.invokeMethod<Map>('status');
@@ -378,7 +418,7 @@ class WearLinkServer {
         ...json,
         'rev': _rev,
         'home': {...home, 'nutritionReceipts': _durableNutritionIds},
-        if (json['workoutId'] != '') 'appliedOperationIds': _durableOperationIds,
+        'appliedOperationIds': _durableOperationIds,
       },
       fingerprint: fingerprint,
     );

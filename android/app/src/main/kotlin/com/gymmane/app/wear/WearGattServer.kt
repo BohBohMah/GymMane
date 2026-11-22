@@ -15,12 +15,16 @@ import android.bluetooth.le.AdvertiseCallback
 import android.bluetooth.le.AdvertiseData
 import android.bluetooth.le.AdvertiseSettings
 import android.bluetooth.le.BluetoothLeAdvertiser
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.ParcelUuid
+import androidx.core.content.ContextCompat
 import com.gymmane.wear.protocol.Chunker
 import com.gymmane.wear.protocol.FrameKind
 import com.gymmane.wear.protocol.FrameReader
@@ -70,6 +74,17 @@ class WearGattServer(
     private var serviceReady = false
     private var lastSnapshot: String? = null
     private var lastHomeSent: JsonObject? = null
+    private var pendingHome: JsonObject? = null
+    private var handlingCommands = 0
+    private var listeningForUnlock = false
+    private val phoneUnlock = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            if (intent.action == Intent.ACTION_USER_PRESENT && prefs.serverEnabled) {
+                start()
+                if (session != null) sendState()
+            }
+        }
+    }
 
     val supported: Boolean
         get() = Build.VERSION.SDK_INT >= 31 &&
@@ -125,18 +140,31 @@ class WearGattServer(
         rx = write
         tx = notify
         gattServer = open
+        if (!listeningForUnlock) {
+            listeningForUnlock = runCatching {
+                ContextCompat.registerReceiver(
+                    context, phoneUnlock, IntentFilter(Intent.ACTION_USER_PRESENT), ContextCompat.RECEIVER_NOT_EXPORTED,
+                )
+            }.isSuccess
+        }
         WearLinkDiagnostics.log("phone server opened; waiting for service registration")
         emit()
         return true
     }
 
     fun stop() {
+        if (listeningForUnlock) {
+            context.unregisterReceiver(phoneUnlock)
+            listeningForUnlock = false
+        }
         main.removeCallbacks(handshakeTimeout)
         stopAdvertising()
         session = null
         handshake = null
         reader.reset()
         queue.clear()
+        pendingHome = null
+        handlingCommands = 0
         sending = false
         closeAfterSend = false
         subscribed = false
@@ -348,6 +376,8 @@ class WearGattServer(
         connected = device
         session = null
         lastHomeSent = null
+        pendingHome = null
+        handlingCommands = 0
         subscribed = false
         main.removeCallbacks(handshakeTimeout)
         val timeout = if (pairingActive) 125_000L else 15_000L
@@ -363,6 +393,9 @@ class WearGattServer(
             pairingPin = { if (pairingActive) prefs.pairingPin else null },
             onPaired = { id, name, psk -> prefs.savePsk(id, name, psk) },
             onPairingFailure = { prefs.notePairingFailure() },
+            // Writes and subscription are already protected by Android's
+            // encrypted, MITM-authenticated GATT permissions.
+            allowBondedPairing = { pairingActive && device.bondState == BluetoothDevice.BOND_BONDED },
         )
         stopAdvertising()
         emit()
@@ -379,6 +412,8 @@ class WearGattServer(
         queue.clear()
         sending = false
         closeAfterSend = false
+        pendingHome = null
+        handlingCommands = 0
         if (prefs.serverEnabled) advertise()
         WearLinkDiagnostics.log("phone GATT peer disconnected; advertising=${prefs.serverEnabled}")
         emit()
@@ -447,12 +482,14 @@ class WearGattServer(
             "command" -> {
                 val map = WearJson.toMap(opened.data)
                 val commandSession = current
+                handlingCommands++
                 WearLinkDiagnostics.log(
                     "phone received command action=${map["action"] as? String ?: "unknown"}",
                 )
                 onCommand(map) { ack ->
                     onMain {
                         if (session !== commandSession) return@onMain
+                        handlingCommands--
                         if (ack != null) {
                             WearLinkDiagnostics.log(
                                 "phone command ack ok=${ack["ok"]} code=${ack["code"]} rev=${ack["rev"]}",
@@ -507,10 +544,7 @@ class WearGattServer(
         }
         WearLinkDiagnostics.log("phone sending state ${WearLinkDiagnostics.snapshotSummary(json)}")
         val home = data["home"] as? JsonObject
-        if (home != null && home != lastHomeSent) {
-            lastHomeSent = home
-            sendSecure("home", home)
-        }
+        pendingHome = home?.takeIf { it != lastHomeSent }
         sendSecure("state", if (home == null) data else JsonObject(data - "home"))
     }
 
@@ -537,6 +571,11 @@ class WearGattServer(
             if (closeAfterSend) {
                 closeAfterSend = false
                 runCatching { server.cancelConnection(device) }
+            } else if (handlingCommands == 0) {
+                val home = pendingHome ?: return
+                pendingHome = null
+                lastHomeSent = home
+                sendSecure("home", home)
             }
             return
         }
@@ -598,6 +637,7 @@ class WearGattServer(
             "address" to (connected?.address ?: ""),
             "error" to "",
             "pairingCode" to if (pairing) prefs.pairingPin else "",
+            "pairedCount" to prefs.keyCount(),
             "pairingUntil" to if (pairing) Instant.ofEpochMilli(prefs.pairingUntil).toString() else "",
             "sdk" to Build.VERSION.SDK_INT,
         )

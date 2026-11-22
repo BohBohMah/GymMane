@@ -38,6 +38,7 @@ class WearGattClient(
     private val prefs: WearPrefs,
     private val onEvent: (Map<String, Any?>) -> Unit,
     private val onState: (Map<String, Any?>) -> Unit,
+    private val onHome: (Map<String, Any?>) -> Unit,
     private val onAck: (Map<String, Any?>) -> Unit,
     private val onPinRequired: (String) -> Unit,
 ) {
@@ -62,6 +63,7 @@ class WearGattClient(
     private var lastError = ""
     private var awaitingPin = false
     private var dashboard: Map<String, Any?>? = null
+    private var syncPending = false
 
     private val retry = Runnable { connect() }
     private val watchdog = Runnable {
@@ -180,7 +182,28 @@ class WearGattClient(
         "pairingCode" to "",
         "sdk" to Build.VERSION.SDK_INT,
         "pinRequired" to awaitingPin,
+        "pushesInitialState" to true,
     )
+
+    @SuppressLint("MissingPermission")
+    fun setSyncPending(pending: Boolean) {
+        if (syncPending == pending) return
+        syncPending = pending
+        if (pending && wantConnected && gatt == null) {
+            retryAttempt = 0
+            main.removeCallbacks(retry)
+            connect()
+        } else if (session != null) {
+            updateConnectionPriority()
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun updateConnectionPriority() {
+        val priority = if (syncPending) BluetoothGatt.CONNECTION_PRIORITY_HIGH
+            else BluetoothGatt.CONNECTION_PRIORITY_BALANCED
+        runCatching { gatt?.requestConnectionPriority(priority) }
+    }
 
     @SuppressLint("MissingPermission")
     private fun connect() {
@@ -232,7 +255,8 @@ class WearGattClient(
             scheduleRetry()
         } else {
             main.removeCallbacks(watchdog)
-            main.postDelayed(watchdog, CONNECTION_STALL_MS)
+            val limit = if (syncPending) PENDING_CONNECTION_STALL_MS else CONNECTION_STALL_MS
+            main.postDelayed(watchdog, limit)
         }
     }
 
@@ -261,7 +285,8 @@ class WearGattClient(
     private fun scheduleRetry() {
         if (!wantConnected) return
         main.removeCallbacks(retry)
-        val delay = min(30_000L, 2_000L shl min(retryAttempt, 4))
+        val delay = if (syncPending) min(4_000L, 450L shl min(retryAttempt, 4))
+            else min(30_000L, 1_000L shl min(retryAttempt, 5))
         retryAttempt += 1
         main.postDelayed(retry, delay)
     }
@@ -282,7 +307,6 @@ class WearGattClient(
                         "state=${if (newState == BluetoothProfile.STATE_CONNECTED) "connected" else "disconnected"}",
                 )
                 if (status == BluetoothGatt.GATT_SUCCESS && newState == BluetoothProfile.STATE_CONNECTED) {
-                    retryAttempt = 0
                     lastError = ""
                     discoverStarted = false
                     indicationReady = false
@@ -423,6 +447,7 @@ class WearGattClient(
             watchName = prefs.watchName,
             existingPsk = prefs.watchPsk,
             onPaired = { psk -> prefs.watchPsk = psk },
+            trustBluetoothBond = true,
         )
         handshake = watch
         sendHandshake(watch.start())
@@ -463,8 +488,10 @@ class WearGattClient(
             }
             is WatchHandshakeResult.Ready -> {
                 session = result.session
+                retryAttempt = 0
                 handshake = null
                 main.removeCallbacks(watchdog)
+                if (syncPending) updateConnectionPriority()
                 sendHandshake(result.confirm)
                 lastError = ""
                 WearLinkDiagnostics.log("watch handshake ready")
@@ -493,7 +520,11 @@ class WearGattClient(
             return fail("bad_mac")
         }
         when (opened.type) {
-            "home" -> dashboard = WearJson.toMap(opened.data)
+            "home" -> {
+                val home = WearJson.toMap(opened.data)
+                dashboard = home
+                onHome(home)
+            }
             "state" -> {
                 val data = WearJson.toMap(opened.data)
                 WearLinkDiagnostics.log("watch received state ${WearLinkDiagnostics.snapshotSummary(data)}")
@@ -580,6 +611,7 @@ class WearGattClient(
 
     companion object {
         private const val CONNECTION_STALL_MS = 12_000L
+        private const val PENDING_CONNECTION_STALL_MS = 5_000L
         private val CCCD: UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
     }
 }

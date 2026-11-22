@@ -1,0 +1,12 @@
+<resources>
+    <string name="tile_week">questa settimana</string>
+    <string name="tile_start">Inizia</string>
+    <string name="tile_continue">Continua</string>
+    <string name="tile_open">Apri</string>
+    <string name="tile_water_title">Acqua</string>
+    <string name="tile_live_workout">Allenamento in corso</string>
+    <plurals name="tile_streak">
+        <item quantity="one">%d giorno di fila</item>
+        <item quantity="other">%d giorni di fila</item>
+    </plurals>
+</resources>

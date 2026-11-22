@@ -12,10 +12,14 @@ class WearOfflineJournal {
   final DateTime Function() clock;
   Future<void> _tail = Future.value();
   Map<String, dynamic>? _state;
+  List<Map<String, dynamic>> _completed = [];
 
   Map<String, dynamic>? get state => _state == null ? null : _copy(_state!);
 
   bool get hasPending => (_state?['pending'] as List?)?.isNotEmpty ?? false;
+  bool get hasLocalDraft => (_state?['snapshot'] as Map?)?['watchOrigin'] == true;
+  Map<String, dynamic>? get firstCompleted => _completed.isEmpty ? null : _copy(_completed.first);
+  bool get hasCompleted => _completed.isNotEmpty;
   bool hasAction(String action) =>
       (_state?['pending'] as List?)?.any((entry) => (entry as Map)['action'] == action) ?? false;
   Map<String, dynamic>? get snapshot {
@@ -29,20 +33,27 @@ class WearOfflineJournal {
   ];
 
   Future<void> clear() => _transaction(() async {
-    final candidate = jsonEncode(<String, dynamic>{'schema': 1, 'cleared': true});
-    await write(candidate);
+    await _write(null);
     _state = null;
   });
 
   Future<void> restore(String encoded) => _transaction(() async {
     final value = jsonDecode(encoded);
     if (value is! Map<String, dynamic>) throw const FormatException('invalid journal');
+    final completed = value.remove('completed');
+    if (completed != null && (completed is! List || completed.length > 40 ||
+        completed.any((row) => row is! Map<String, dynamic> || row['action'] != 'uploadCompletedWorkout'))) {
+      throw const FormatException('invalid completed workouts');
+    }
+    final archive = (completed as List?)?.cast<Map<String, dynamic>>() ?? <Map<String, dynamic>>[];
     if (value['schema'] == 1 && value['cleared'] == true && value.length == 2) {
       _state = null;
+      _completed = archive;
       return;
     }
     _validate(value);
     _state = _copy(value);
+    _completed = archive;
   });
 
   Future<void> initialize(Map<String, dynamic> snapshot) => _transaction(() async {
@@ -54,9 +65,80 @@ class WearOfflineJournal {
       'pending': <dynamic>[],
     };
     _validate(candidate);
-    await write(jsonEncode(candidate));
+    await _write(candidate);
     _state = candidate;
   });
+
+  // Freeze a single checkpoint for retries. Edits that arrive while it is in
+  // flight append after it and are replayed against the phone's accepted state.
+  Future<void> prepareAdoption(Map<String, dynamic> Function(Map<String, dynamic>) makeCommand) =>
+      _transaction(() async {
+    final current = _state;
+    if (current == null || !hasLocalDraft || hasAction('adoptWorkout')) return;
+    final candidate = _copy(current);
+    final sequence = candidate['nextSequence'] as int;
+    final snapshot = candidate['snapshot'] as Map<String, dynamic>;
+    candidate['pending'] = [
+      {...makeCommand(_copy(snapshot)), 'sequence': sequence},
+    ];
+    candidate['nextSequence'] = sequence + 1;
+    _validate(candidate);
+    await _write(candidate);
+    _state = candidate;
+  });
+
+  Future<void> reopenAdoption(String id) => _transaction(() async {
+    final current = _state;
+    if (current == null || !hasLocalDraft) return;
+    final candidate = _copy(current);
+    final pending = candidate['pending'] as List;
+    if (pending.isEmpty || (pending.first as Map)['id'] != id) return;
+    pending.removeAt(0);
+    await _write(candidate);
+    _state = candidate;
+  });
+
+  Future<bool> discardUnsentDraft() async {
+    var discarded = false;
+    await _transaction(() async {
+      if (!hasLocalDraft || hasAction('adoptWorkout')) return;
+      await _write(null);
+      _state = null;
+      discarded = true;
+    });
+    return discarded;
+  }
+
+  Future<bool> archiveUnsentDraft(Map<String, dynamic> Function(Map<String, dynamic>) makeCommand) async {
+    var saved = false;
+    await _transaction(() async {
+      if (!hasLocalDraft || hasAction('adoptWorkout')) return;
+      if (_completed.length >= 40) throw StateError('completed workout queue is full');
+      final snapshot = _copy(_state!['snapshot'] as Map<String, dynamic>);
+      _reduce(snapshot, {'action': 'finish', 'args': <String, dynamic>{}});
+      final archive = [..._completed, makeCommand(snapshot)];
+      await _write(null, completed: archive);
+      _completed = archive;
+      _state = null;
+      saved = true;
+    });
+    return saved;
+  }
+
+  Future<void> acknowledgeCompleted(String id) => _transaction(() async {
+    final archive = _completed.where((command) => command['id'] != id).toList();
+    if (archive.length == _completed.length) return;
+    await _write(_state, completed: archive);
+    _completed = archive;
+  });
+
+  Future<void> _write(Map<String, dynamic>? state, {List<Map<String, dynamic>>? completed}) {
+    final archive = completed ?? _completed;
+    return write(jsonEncode({
+      ...state ?? const {'schema': 1, 'cleared': true},
+      if (archive.isNotEmpty) 'completed': archive,
+    }));
+  }
 
   /// Replaces the authoritative base and reapplies every unacknowledged local
   /// operation. This is used after reconnect so phone changes and watch edits
@@ -72,7 +154,7 @@ class WearOfflineJournal {
         'pending': <dynamic>[],
       };
       _validate(candidate);
-      await write(jsonEncode(candidate));
+      await _write(candidate);
       _state = candidate;
       return;
     }
@@ -85,7 +167,7 @@ class WearOfflineJournal {
         'pending': <dynamic>[],
       };
       _validate(candidate);
-      await write(jsonEncode(candidate));
+      await _write(candidate);
       _state = candidate;
       return;
     }
@@ -107,6 +189,9 @@ class WearOfflineJournal {
     for (final operation in pending) {
       try {
         final derived = _reduce(candidate['snapshot'] as Map<String, dynamic>, operation);
+        // Older journals may still contain a relative operation that the
+        // phone has seen. Keep its original identity and arguments on retry.
+        if (operation['action'] == 'adjustSet') derived.remove('weight');
         if (derived.isNotEmpty) {
           operation['args'] = {...(operation['args'] as Map).cast<String, dynamic>(), ...derived};
         }
@@ -117,7 +202,7 @@ class WearOfflineJournal {
       (candidate['pending'] as List).add(operation);
     }
     _validate(candidate);
-    await write(jsonEncode(candidate));
+    await _write(candidate);
     _state = candidate;
   });
 
@@ -144,14 +229,22 @@ class WearOfflineJournal {
       if (!ids.add(id)) throw StateError('duplicate operation');
       final derived = _reduce(snapshot, operation);
       final stored = _copy(operation);
-      if (derived.isNotEmpty) {
+      if (stored['action'] == 'adjustSet' && derived.containsKey('weight')) {
+        // The stepper reads the last committed local value (including rapid
+        // taps). The phone receives the resulting weight, never an increment.
+        stored['action'] = 'updateSet';
+        final args = (stored['args'] as Map).cast<String, dynamic>()
+          ..remove('field')
+          ..remove('delta');
+        stored['args'] = {...args, 'weight': derived['weight']};
+      } else if (derived.isNotEmpty) {
         stored['args'] = {...(stored['args'] as Map).cast<String, dynamic>(), ...derived};
       }
       pending.add({...stored, 'sequence': sequence++});
     }
     candidate['nextSequence'] = sequence;
     _validate(candidate);
-    await write(jsonEncode(candidate));
+    await _write(candidate);
     _state = candidate;
   });
 
@@ -214,7 +307,12 @@ class WearOfflineJournal {
       if (action == 'completeSet' || action == 'uncompleteSet') {
         final complete = action == 'completeSet';
         final sideSeconds = (set['sideRestSec'] as num?)?.toInt() ?? 0;
-        final switchSides = complete && set['done'] != true && set['half'] != true && sideSeconds > 0;
+        if (complete && (set['done'] == true || (args['firstSide'] == true && set['half'] == true))) {
+          // Already completed on the phone. Keep its recovery deadline.
+          return derived;
+        }
+        final switchSides = complete && set['half'] != true && sideSeconds > 0;
+        if (switchSides && !args.containsKey('firstSide')) derived['firstSide'] = true;
         final done = complete && !switchSides;
         set['done'] = done;
         if (switchSides) {
@@ -222,28 +320,28 @@ class WearOfflineJournal {
         } else {
           set.remove('half');
         }
-        if (complete) {
+        if (complete && args['keepRest'] != true) {
           final storedEndsAt = args['restEndsAt'];
-          final storedTotal = (args['restTotalSec'] as num?)?.toInt();
-          final replayed = storedEndsAt is String && DateTime.tryParse(storedEndsAt) != null;
-          final seconds = replayed
-              ? (storedTotal ?? 0)
-              : switchSides ? sideSeconds : _restSeconds(snapshot, exerciseIndex, setIndex, exercise, set);
-          final endsAt = replayed ? DateTime.parse(storedEndsAt) : _now().add(Duration(seconds: seconds));
-          if (seconds > 0 && endsAt.isAfter(_now())) {
-            if (snapshot['status'] != 'paused') {
-              snapshot['rest'] = {
-                'endsAt': endsAt.toIso8601String(),
-                'totalSec': (storedTotal ?? seconds).clamp(0, 3600),
-                'switchSides': switchSides,
-              };
-            }
-            if (!replayed) {
-              derived['restEndsAt'] = endsAt.toIso8601String();
+          final originalDeadline = storedEndsAt is String ? DateTime.tryParse(storedEndsAt) : null;
+          final now = _now();
+          if (originalDeadline == null && snapshot['status'] == 'paused') {
+            derived['keepRest'] = true;
+          } else {
+            final seconds = originalDeadline != null
+                ? (args['restTotalSec'] as num?)?.toInt() ?? 0
+                : switchSides ? sideSeconds : _restSeconds(snapshot, exerciseIndex, setIndex, exercise, set);
+            final endsAt = originalDeadline ?? now.add(Duration(seconds: seconds));
+            if (originalDeadline == null) {
+              derived['restEndsAt'] = endsAt.toUtc().toIso8601String();
               derived['restTotalSec'] = seconds;
             }
-          } else if (!replayed) {
-            snapshot['rest'] = null;
+            if (snapshot['status'] != 'paused') {
+              snapshot['rest'] = seconds > 0 && endsAt.isAfter(now) ? {
+                'endsAt': endsAt.toUtc().toIso8601String(),
+                'totalSec': seconds.clamp(0, 3600),
+                'switchSides': switchSides,
+              } : null;
+            }
           }
         }
         _refreshSummary(snapshot);
@@ -270,6 +368,7 @@ class WearOfflineJournal {
           throw const FormatException('adjustment out of range');
         }
         set[key] = integer ? result.toInt() : result.toDouble();
+        if (key == 'weight') derived['weight'] = set[key];
       } else {
         var changed = false;
         for (final key in const ['reps', 'repsRight', 'weight', 'rpe', 'sec', 'km', 'kind']) {
@@ -468,7 +567,7 @@ class WearOfflineJournal {
         candidate['nextSequence'] = sequence + 1;
         candidate['snapshot'] = _copy(snapshot);
         _validate(candidate);
-        await write(jsonEncode(candidate));
+        await _write(candidate);
         _state = candidate;
       });
 
@@ -483,8 +582,12 @@ class WearOfflineJournal {
     if (current == null) throw StateError('journal not initialized');
     final candidate = _copy(current);
     final pending = candidate['pending'] as List;
+    if (pending.isNotEmpty && (pending.first as Map)['action'] == 'adoptWorkout' &&
+        (pending.first as Map)['id'] == operationIds.first) {
+      (candidate['snapshot'] as Map).remove('watchOrigin');
+    }
     _removeConfirmedPrefix(pending, operationIds);
-    await write(jsonEncode(candidate));
+    await _write(candidate);
     _state = candidate;
   });
 

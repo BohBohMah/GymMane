@@ -18,12 +18,12 @@ abstract class WearWorkoutApi {
 
   /// Adopts an already running rest at an absolute deadline, used when a
   /// watch completion is replayed after being offline.
-  void adoptRest(DateTime endsAt, int totalSec);
+  void adoptRest(DateTime endsAt, int totalSec, {bool switchSides = false});
   String get effortMode;
   String get workoutName;
   bool get hasData;
 
-  void toggleSet(int exerciseIndex, int setIndex);
+  void toggleSet(int exerciseIndex, int setIndex, {bool startRecovery = true});
   void setWeight(int exerciseIndex, int setIndex, double kg);
   void setReps(int exerciseIndex, int setIndex, int reps);
   void setRepsRight(int exerciseIndex, int setIndex, int reps);

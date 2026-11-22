@@ -1,5 +1,7 @@
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:gymmane/catalog/exercise_catalog.dart';
+import 'package:gymmane/wear/link/wear_workout_handoff.dart';
 import 'package:gymmane/wear/link/wear_link_client.dart';
 import 'package:gymmane/wear/link/wear_link_status.dart';
 
@@ -103,6 +105,46 @@ void main() {
     messenger.setMockMethodCallHandler(_channel, null);
     WearLinkClient.debugSupportedOverride = null;
     client().resetForTest();
+  });
+
+  test('an offline start sends the latest workout checkpoint as soon as the link returns', () async {
+    final start = await client().homeCommand('startExercises', args: {'ids': [kExercises.first.id]});
+    expect(start.ok, true);
+    final original = client().workout.value!;
+    expect((await client().updateSet(0, 0, weight: 8.25, reps: 7)).ok, true);
+    expect((await client().completeSet(0, 0)).ok, true);
+    await native('clientEvent', _connected);
+    final send = calls.where((call) => call.method == 'sendCommand').single.arguments as Map;
+    expect(send['action'], 'adoptWorkout');
+    expect(send['workoutId'], original.workoutId);
+    final payload = readWearHandoff(Map<String, dynamic>.from(send['args'] as Map),
+        original.workoutId, DateTime.now());
+    expect(payload!.session.exercises.first.sets.first.weight, 8.25);
+    expect(payload.session.exercises.first.sets.first.reps, 7);
+    expect(payload.session.exercises.first.sets.first.done, true);
+    await idleWorkout();
+    expect(client().workout.value!.workoutId, original.workoutId);
+    await native('ack', {'id': send['id'], 'ok': true, 'rev': 3, 'code': 'ok'});
+    expect(client().workout.value!.doneSets, 1);
+  });
+
+  test('a finished offline workout frees the watch to start another one', () async {
+    final exercises = {'ids': [kExercises.first.id]};
+    expect((await client().homeCommand('startExercises', args: exercises)).ok, true);
+    final first = client().workout.value!.workoutId;
+    expect((await client().completeSet(0, 0)).ok, true);
+    expect((await client().finishAndSave()).ok, true);
+    expect(client().workout.value?.hasWorkout, false);
+    expect((await client().homeCommand('startExercises', args: exercises)).ok, true);
+    final second = client().workout.value!.workoutId;
+    expect(second, isNot(first));
+    await native('clientEvent', _connected);
+    var sent = calls.where((call) => call.method == 'sendCommand').single.arguments as Map;
+    expect(sent['workoutId'], second);
+    await native('ack', {'id': sent['id'], 'ok': true, 'rev': 2, 'code': 'ok'});
+    sent = calls.where((call) => call.method == 'sendCommand').last.arguments as Map;
+    expect(sent['action'], 'uploadCompletedWorkout');
+    expect(sent['workoutId'], first);
   });
 
   test('a command updates immediately and stays queued until the phone ack', () async {
@@ -399,7 +441,7 @@ void main() {
     expect(client().home.value!['supplements'][0]['done'], false);
   });
 
-  test('rapid connected weight taps update locally and queue every delta', () async {
+  test('rapid connected weight taps update locally without losing any taps', () async {
     await native('clientEvent', _connected);
     await activeWorkout();
     calls.clear();
@@ -413,6 +455,30 @@ void main() {
     expect(replies.every((ack) => ack.ok && ack.code == 'queued'), isTrue);
     expect(client().workout.value!.exercises.first.sets.first.weight, 67.5);
     expect(calls.where((call) => call.method == 'sendCommand').length, 1);
+  });
+
+  test('reconnect reads the phone revision before replaying absolute weight', () async {
+    await activeWorkout(weight: 20);
+    await client().adjustSet(0, 0, field: 'weight', delta: 20);
+    calls.clear();
+
+    await native('clientEvent', {..._connected, 'pushesInitialState': true});
+    expect(calls.where((call) => call.method == 'sendCommand'), isEmpty);
+    await activeWorkout(rev: 2, weight: 40);
+
+    final sent = calls.where((call) => call.method == 'sendCommand').single.arguments as Map;
+    expect(sent['baseRev'], 2);
+    expect(sent['action'], 'updateSet');
+    expect((sent['args'] as Map)['weight'], 40);
+    expect((sent['args'] as Map).containsKey('delta'), false);
+    expect(client().workout.value!.exercises.first.sets.first.weight, 40);
+
+    // The snapshot confirms durability even if the Bluetooth ACK was lost.
+    await activeWorkout(rev: 3, weight: 40, applied: [sent['id'] as String]);
+    await client().adjustSet(0, 0, field: 'weight', delta: 2.5);
+    await Future<void>.delayed(Duration.zero);
+    final next = calls.where((call) => call.method == 'sendCommand').last.arguments as Map;
+    expect((next['args'] as Map)['weight'], 42.5);
   });
 
   test('late phone states never make rapid connected taps jump backwards', () async {

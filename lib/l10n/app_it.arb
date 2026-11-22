@@ -2312,8 +2312,8 @@
   "todayNotNow": "Non ora",
   "todayRestBody": "Riposare fa parte del piano. I muscoli crescono mentre recuperi.",
 
-  "wearLinkPhoneTitle": "Collegamento smartwatch",
-  "wearLinkPhoneBody": "Controlla l'allenamento in corso da uno smartwatch Wear OS abbinato tramite Bluetooth locale. Disattivato per impostazione predefinita. Nessun internet, account o cloud.",
+  "wearLinkPhoneTitle": "Orologio Wear OS",
+  "wearLinkPhoneBody": "Attiva la sincronizzazione Bluetooth e apri GymMane sull’orologio già abbinato. Gli allenamenti passano da un dispositivo all’altro via Bluetooth.",
   "wearLinkPhoneEnable": "Attiva collegamento smartwatch",
   "wearLinkPhoneUnsupported": "Richiede Android 12 o successivo con Bluetooth LE.",
   "wearLinkPhoneOff": "Disattivato",

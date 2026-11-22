@@ -2851,8 +2851,8 @@
   "alsoWorksMuscles": "Also works {muscles}",
   "@alsoWorksMuscles": { "placeholders": { "muscles": { "type": "String" } } },
 
-  "wearLinkPhoneTitle": "Smartwatch link",
-  "wearLinkPhoneBody": "Control the live workout from a paired Wear OS watch over local Bluetooth. Off by default. No internet, no account, no cloud.",
+  "wearLinkPhoneTitle": "Wear OS watch",
+  "wearLinkPhoneBody": "Enable Bluetooth sync and open GymMane on your paired watch. Workouts move between devices over Bluetooth.",
   "wearLinkPhoneEnable": "Enable smartwatch link",
   "wearLinkPhoneUnsupported": "Requires Android 12 or newer with Bluetooth LE.",
   "wearLinkPhoneOff": "Off",

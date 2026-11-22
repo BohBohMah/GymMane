@@ -145,4 +145,70 @@ void main() {
     final operations = saved['wearAppliedOperations'] as Map;
     expect(operations.keys, containsAll(['batch-1', 'batch-2', 'batch-3', 'batch-command']));
   });
+
+  test('phone keeps its current workout and imports completed watch workouts once', () async {
+    final server = WearLinkServer.instance;
+    final current = fit.session!;
+    final incoming = WorkoutSession(sessionId: '0123456789abcdef01234567')
+      ..loggedAt = DateTime.now()
+      ..exercises = [
+        SessionExercise('exercise', 'Example', 'test', [SessionSet(8, 12.5, true)]),
+      ];
+    final args = {
+      'session': incoming.toJson(),
+      'status': 'active',
+      'elapsed': 81,
+      'anchor': DateTime.now().toIso8601String(),
+      'restTotal': 0,
+    };
+    Map<String, dynamic> command(String id, String action, Map<String, dynamic> payload) => {
+      'id': id, 'action': action, 'baseRev': server.debugRevision, 'workoutId': incoming.sessionId, 'args': payload,
+    };
+    final adoption = command('watch-new-session', 'adoptWorkout', args);
+    expect((await server.debugCommand(adoption))['code'], 'active_session');
+    expect(fit.session, same(current));
+    final initialCount = fit.sessions.length;
+    final finished = command('watch-finished-session', 'uploadCompletedWorkout', {...args, 'status': 'complete'});
+    expect((await server.debugCommand(finished))['ok'], true);
+    expect((await server.debugCommand(finished))['ok'], true);
+    expect(fit.sessions.length, initialCount + 1);
+    expect(fit.session, same(current));
+    fit.saveAndExit();
+    addTearDown(fit.saveAndExit);
+    expect((await server.debugCommand(adoption))['ok'], true);
+    expect(fit.session!.sessionId, incoming.sessionId);
+    expect(fit.session!.exercises.single.sets.single.weight, 12.5);
+    expect(fit.sessionElapsed, greaterThanOrEqualTo(81));
+  });
+
+  test('phone persists the running watch recovery at the original deadline', () async {
+    addTearDown(fit.saveAndExit);
+    final server = WearLinkServer.instance;
+    final set = SessionSet(8, 40, false);
+    final session = WorkoutSession()
+      ..exercises = [SessionExercise('exercise', 'Example', 'test', [set])];
+    fit.session = session;
+    final deadline = DateTime.now().toUtc().add(const Duration(seconds: 90));
+    final reply = await server.debugCommand({
+      'id': 'recovery-watch-deadline',
+      'baseRev': server.debugRevision,
+      'action': 'completeSet',
+      'workoutId': session.sessionId,
+      'args': {
+        'exerciseIndex': 0,
+        'exerciseId': 'exercise',
+        'setIndex': 0,
+        'setId': set.setId,
+        'restEndsAt': deadline.toIso8601String(),
+        'restTotalSec': 120,
+        'restRemainingSec': 90,
+      },
+    });
+    expect(reply['ok'], true);
+    expect(set.done, true);
+    expect(session.restEndsAt, deadline);
+    expect(fit.restTotal, 120);
+    final stored = WorkoutSession.fromJson((Store.instance.load()['live'] as Map).cast<String, dynamic>());
+    expect(stored.restEndsAt, deadline);
+  });
 }

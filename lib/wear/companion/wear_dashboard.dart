@@ -9,6 +9,7 @@ import '../../theme/app_theme.dart';
 import '../link/wear_home.dart';
 import '../wear_shell.dart';
 import 'wear_exercise_guide.dart';
+import 'wear_motion.dart';
 
 enum WearSection { home, routines, exercises, nutrition }
 
@@ -26,6 +27,7 @@ class WearDashboard extends StatefulWidget {
     required this.feedback,
     required this.openWorkout,
     required this.openLink,
+    this.openSettings,
     this.pendingNutrition = 0,
   });
 
@@ -40,6 +42,7 @@ class WearDashboard extends StatefulWidget {
   final Widget feedback;
   final VoidCallback openWorkout;
   final VoidCallback openLink;
+  final VoidCallback? openSettings;
   final int pendingNutrition;
 
   @override
@@ -53,6 +56,7 @@ class _WearDashboardState extends State<WearDashboard> {
 
   Map<String, dynamic> get _data => widget.data ?? const {};
   bool get _canSend => widget.connected && !widget.busy && widget.data != null;
+  bool get _canStartExercises => !widget.busy && !widget.workoutActive;
   String get _today => wearDayKey(DateTime.now());
   bool get _isToday => _data['day'] == _today;
 
@@ -69,6 +73,7 @@ class _WearDashboardState extends State<WearDashboard> {
     return WearPage(
       key: ValueKey(widget.section),
       scaleEdges: false,
+      topPadding: 8,
       children: [
         Center(child: widget.header),
         const SizedBox(height: 8),
@@ -82,35 +87,101 @@ class _WearDashboardState extends State<WearDashboard> {
 
   List<Widget> _home() {
     final routine = _isToday ? _data['today'] as Map? : null;
+    final done = _data['weekDone'];
+    final goal = _data['weekGoal'];
+    final streak = _data['streak'];
+    final needsFirstLink = !widget.connected && widget.data == null && !widget.workoutActive;
     return [
+      if (done is int && done >= 0 && goal is int && goal > 0) ...[
+        WearWeekProgress(done: done, goal: goal, streak: streak is int ? streak : 0),
+        const SizedBox(height: 10),
+      ],
       if (widget.workoutActive)
         _button(t.continueWorkout, PhosphorIconsFill.play, widget.openWorkout, primary: true)
-      else if (routine != null) ...[
-        _caption(routine['name'] as String),
-        _button(t.startWorkout, PhosphorIconsFill.play, _canSend ? () => _startRoutine(routine) : null, primary: true),
-      ],
-      _button(t.routines, PhosphorIconsRegular.barbell, () => widget.setSection(WearSection.routines)),
+      else if (needsFirstLink)
+        _button(t.wearLinkConnect, PhosphorIconsRegular.linkSimple, widget.openLink, primary: true)
+      else
+        _button(
+          t.startWorkout,
+          PhosphorIconsFill.play,
+          routine == null
+              ? () => widget.setSection(WearSection.routines)
+              : _canStartRoutine(routine) ? () => _startRoutine(routine) : null,
+          primary: true,
+        ),
+      if (routine != null && !widget.workoutActive) _caption(routine['name'] as String),
+      _button(t.routines, PhosphorIconsRegular.listBullets, () => widget.setSection(WearSection.routines)),
       _button(t.exercises, PhosphorIconsRegular.listChecks, () => widget.setSection(WearSection.exercises)),
       if (_data['nutrition'] != false)
         _button(t.nutrition, PhosphorIconsRegular.drop, () => widget.setSection(WearSection.nutrition)),
-      if (!widget.connected) _button(t.wearLinkConnect, PhosphorIconsRegular.linkSimple, widget.openLink),
+      if (!widget.connected && !needsFirstLink)
+        _button(t.wearLinkConnect, PhosphorIconsRegular.linkSimple, widget.openLink),
+      if (widget.openSettings != null) _button(t.settings, PhosphorIconsRegular.gearSix, widget.openSettings),
     ];
   }
 
   void _startRoutine(Map routine) => widget.action('startRoutine', {'id': routine['id']});
 
+  bool _canStartRoutine(Map routine) => _canStartExercises &&
+      (_canSend || _list('routines').any((row) => row['id'] == routine['id'] && row['draft'] is Map));
+
   List<Widget> _routines() {
     final routines = _list('routines');
+    final planned = _isToday ? _data['today'] as Map? : null;
+    final today = planned?['id'];
     return [
       _heading(t.routines),
       if (routines.isEmpty) _caption(widget.connected && widget.data != null ? t.noRoutines : t.wearLinkOffline),
-      for (final routine in routines)
-        _button(
-          routine['name'] as String,
-          PhosphorIconsRegular.barbell,
-          _canSend && !widget.workoutActive ? () => _startRoutine(routine) : null,
-        ),
+      for (final routine in routines.where((routine) => routine['id'] == today)) _routineCard(routine, today: true),
+      for (final routine in routines.where((routine) => routine['id'] != today)) _routineCard(routine, today: false),
     ];
+  }
+
+  Widget _routineCard(Map routine, {required bool today}) {
+    final gc = context.gc;
+    final count = routine['count'];
+    final shape = RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(26),
+      side: BorderSide(color: today ? gc.accent : Colors.transparent, width: 1.4),
+    );
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Material(
+        color: gc.bgRaised,
+        shape: shape,
+        child: InkWell(
+          customBorder: shape,
+          onTap: _canStartRoutine(routine) ? () => _startRoutine(routine) : null,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: 52),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          routine['name'] as String,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: AppTheme.f(13, color: gc.text, weight: FontWeight.w800),
+                        ),
+                        if (count is int)
+                          Text(t.exerciseCount(count), style: AppTheme.f(11, color: gc.textSecondary)),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Icon(PhosphorIconsFill.play, size: 15, color: today ? gc.accent : gc.textSecondary),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   List<Widget> _exercises() {
@@ -125,7 +196,7 @@ class _WearDashboardState extends State<WearDashboard> {
       _button(
         '${t.startWorkout} (${_selected.length})',
         PhosphorIconsFill.play,
-        _canSend && !widget.workoutActive && _selected.isNotEmpty
+        _canStartExercises && _selected.isNotEmpty
             ? () => widget.action('startExercises', {'ids': _selected.toList()})
             : null,
         primary: true,
@@ -186,7 +257,18 @@ class _WearDashboardState extends State<WearDashboard> {
         _caption('${t.wearLinkWaiting} · ${widget.pendingNutrition}'),
       if (valid) ...[
         _heading(t.waterLabel),
-        _caption('${_data['water']} / ${_data['waterGoal']} ml'),
+        Padding(
+          padding: const EdgeInsets.only(bottom: 6),
+          child: Center(
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: WearRollingDigits(
+                '${_data['water']} / ${_data['waterGoal']} ml',
+                style: AppTheme.f(12, weight: FontWeight.w500, color: context.gc.textSecondary),
+              ),
+            ),
+          ),
+        ),
         _button(
           '+$glass ml',
           PhosphorIconsFill.drop,

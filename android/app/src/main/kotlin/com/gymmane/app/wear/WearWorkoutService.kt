@@ -10,6 +10,8 @@ import android.os.IBinder
 import android.content.pm.PackageManager
 import androidx.core.app.NotificationCompat
 import androidx.wear.ongoing.OngoingActivity
+import com.gymmane.app.BuildConfig
+import com.gymmane.app.CompanionTiles
 import com.gymmane.app.MainActivity
 import com.gymmane.app.R
 
@@ -21,17 +23,20 @@ class WearWorkoutService : Service() {
         manager.createNotificationChannel(
             NotificationChannel(CHANNEL, "Workout", NotificationManager.IMPORTANCE_LOW),
         )
+        val intent = Intent(this, MainActivity::class.java).apply {
+            action = "com.gymmane.app.wear.OPEN_ONGOING_WORKOUT"
+            addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            if (BuildConfig.APPLICATION_ID == "com.gymmane.test.wear") putExtra("gymmane_open", "wear/workout")
+        }
         val open = PendingIntent.getActivity(
-            this, 0,
-            Intent(this, MainActivity::class.java).addFlags(
-                Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP,
-            ),
+            this, 0, intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         val notification = NotificationCompat.Builder(this, CHANNEL)
             .setSmallIcon(R.drawable.ic_stat_gymmane)
             .setContentTitle("GymMane")
-            .setContentText("Workout in progress")
+            .setContentText(if (BuildConfig.APPLICATION_ID == "com.gymmane.test.wear")
+                CompanionTiles.strings(this).getString(R.string.tile_live_workout) else "Workout in progress")
             .setCategory(NotificationCompat.CATEGORY_WORKOUT)
             .setContentIntent(open)
             .setOngoing(true)
