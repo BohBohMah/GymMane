@@ -106,6 +106,8 @@ String _extrasLine(Macros m) => [
       if (m.sugar > 0) '${t.sugarLabel} ${_g(m.sugar)} g',
       if (m.sodium > 0) '${t.sodiumLabel} ${m.sodium.round()} mg',
       if (m.chol > 0) '${t.cholesterolLabel} ${m.chol.round()} mg',
+      if (fit.trackerOn(Tracker.minerals) && m.iron > 0) '${t.ironLabel} ${fmt((m.iron * 10).round() / 10)} mg',
+      if (fit.trackerOn(Tracker.minerals) && m.potassium > 0) '${t.potassiumLabel} ${m.potassium.round()} mg',
     ].join('  ·  ');
 
 class _RingCard extends StatelessWidget {
@@ -116,8 +118,10 @@ class _RingCard extends StatelessWidget {
     required this.value,
     required this.sub,
     required this.pct,
+    this.unit = 'g',
   });
 
+  final String unit;
   final IconData icon;
   final Color color;
   final String label;
@@ -153,7 +157,7 @@ class _RingCard extends StatelessWidget {
                 textBaseline: TextBaseline.alphabetic,
                 children: [
                   RollingText(value, style: AppTheme.f(21, weight: FontWeight.w800, color: gc.text, height: 1.05)),
-                  Text(' g', style: AppTheme.f(12, weight: FontWeight.w700, color: gc.textSecondary)),
+                  Text(' $unit', style: AppTheme.f(12, weight: FontWeight.w700, color: gc.textSecondary)),
                 ],
               )),
             ),
@@ -212,8 +216,28 @@ class _DetailGrid extends StatelessWidget {
           pct: total.sodium / goals.sodium,
         ),
       ],
+      if (fit.trackerOn(Tracker.minerals)) ...[
+        _RingCard(
+          icon: PhosphorIconsFill.drop,
+          color: gc.danger,
+          label: t.ironLabel,
+          value: fmt((total.iron * 10).round() / 10),
+          sub: '/ ${fit.ironGoal(goals)} mg',
+          pct: total.iron / fit.ironGoal(goals),
+          unit: 'mg',
+        ),
+        _RingCard(
+          icon: PhosphorIconsFill.lightning,
+          color: gc.sage,
+          label: t.potassiumLabel,
+          value: fmt((total.potassium / 100).round() / 10),
+          sub: '/ ${fmt(fit.potassiumGoal(goals) / 1000)} g',
+          pct: total.potassium / fit.potassiumGoal(goals),
+        ),
+      ],
     ];
     if (cards.isEmpty) return const SizedBox.shrink();
+    final cover = fit.trackerOn(Tracker.minerals) ? fit.mineralsCoverage(day) : null;
     const perRow = 2;
     return Column(children: [
       for (var i = 0; i < cards.length; i += perRow) ...[
@@ -231,6 +255,12 @@ class _DetailGrid extends StatelessWidget {
               ],
           ]),
         ),
+      ],
+      if (cover != null && cover.total > 0 && cover.known < cover.total) ...[
+        const SizedBox(height: 8),
+        Text(t.mineralsCoverage(cover.known, cover.total),
+            textAlign: TextAlign.center,
+            style: AppTheme.f(11.5, weight: FontWeight.w600, color: gc.textTertiary, height: 1.35)),
       ],
     ]);
   }
@@ -992,6 +1022,24 @@ class _SupplementsCardState extends State<_SupplementsCard> {
           if (due.isNotEmpty)
             Text('$done/${due.length}',
                 style: AppTheme.f(13, weight: FontWeight.w800, color: done == due.length ? gc.sage : gc.textSecondary)),
+          if (list.isNotEmpty || archived.isNotEmpty)
+            Semantics(
+              button: true,
+              label: t.suppProgressTitle,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => showSuppProgress(context),
+                child: Padding(
+                  padding: const EdgeInsetsDirectional.only(start: 10),
+                  child: Container(
+                    width: 30,
+                    height: 30,
+                    decoration: BoxDecoration(color: gc.bgRaised2, shape: BoxShape.circle),
+                    child: Icon(PhosphorIconsRegular.calendarCheck, size: 15, color: gc.text),
+                  ),
+                ),
+              ),
+            ),
         ]),
         const SizedBox(height: 10),
         if (list.isEmpty) ...[
@@ -1282,11 +1330,18 @@ Future<void> showSupplementInfo(BuildContext context, Supplement supp) => _sheet
           ]),
         ),
         const SizedBox(height: 18),
-        Row(children: [
-          Expanded(child: _kicker(gc, t.suppHistory.toUpperCase())),
-          if (due.isNotEmpty)
-            Text(t.suppTakenOf(done, due.length), style: AppTheme.f(12, weight: FontWeight.w800, color: gc.textSecondary)),
-        ]),
+        GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () => showSuppProgress(context, id: s.id),
+          child: Row(children: [
+            Expanded(child: _kicker(gc, t.suppHistory.toUpperCase())),
+            if (due.isNotEmpty)
+              Text(t.suppTakenOf(done, due.length), style: AppTheme.f(12, weight: FontWeight.w800, color: gc.textSecondary)),
+            const SizedBox(width: 10),
+            Text(t.healthSeeAll, style: AppTheme.f(12, weight: FontWeight.w800, color: gc.accent)),
+            Icon(PhosphorIconsBold.caretRight, size: 11, color: gc.accent),
+          ]),
+        ),
         const SizedBox(height: 10),
         Row(children: [
           for (final d in days)

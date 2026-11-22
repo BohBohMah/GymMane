@@ -134,6 +134,30 @@ void main() {
       expect(fit.takenOn(day), {a.id, b.id});
       expect(fit.takenOn(DateTime.now()), isEmpty);
     });
+
+    test('#439 racha, mes y constancia de los suplementos', () {
+      final a = fit.addSupplement('Creatina')!;
+      final b = fit.addSupplement('Omega 3')!;
+      final today = DateTime(2026, 11, 21);
+      DateTime ago(int n) => DateTime(2026, 11, 21 - n);
+      for (var i = 9; i >= 0; i--) {
+        fit.takeSupplementsOn(ago(i), [a.id, if (i != 4) b.id]);
+      }
+      expect(fit.suppStart(a), ago(9));
+      expect(fit.suppStreak(id: a.id, today: today), (current: 10, best: 10));
+      expect(fit.suppStreak(today: today), (current: 4, best: 5));
+      expect(fit.suppAdherence(id: b.id, days: 10, today: today), (due: 10, taken: 9));
+      expect(fit.suppAdherence(days: 10, today: today), (due: 20, taken: 19));
+      expect(fit.suppDayCount(ago(4)), (due: 2, taken: 1));
+      expect(fit.suppTakenTotal(a.id), 10);
+      final tomorrow = DateTime(2026, 11, 22);
+      expect(fit.suppStreak(id: a.id, today: tomorrow).current, 10);
+      expect(fit.suppStreak(id: a.id, today: DateTime(2026, 11, 23)).current, 0);
+      final days = fit.suppMonthDays(DateTime(2026, 11), id: a.id);
+      expect(days.length, 30);
+      expect(days[20], (due: 1, taken: 1));
+      expect(days[10], (due: 0, taken: 0));
+    });
   });
 
   group('objetivos', () {
@@ -1105,6 +1129,35 @@ void main() {
       fit.cancelFast();
       expect(fit.fasts, isEmpty);
     });
+
+    test('Ramadán cuenta ayunos y días por recuperar, y se guarda', () {
+      final now = DateTime.now();
+      final today = DateTime(now.year, now.month, now.day);
+      fit.setRamadan(true);
+      fit.ramadanFrom = today.subtract(const Duration(days: 4));
+      fit.setRamadanTimes(suhoor: 0, iftar: 1);
+      fit.toggleRamadanSkip(today.subtract(const Duration(days: 2)));
+      expect(fit.ramadanDay, 5);
+      expect(fit.ramadanCount, (fasted: now.isBefore(fit.ramadanAt(today, 1)) ? 3 : 4, owed: 1));
+      fit.persistNow();
+      fit.loadFromStore();
+      expect(fit.ramadan, isTrue);
+      expect((fit.suhoorMinute, fit.iftarMinute), (0, 1));
+      expect(fit.ramadanSkippedOn(today.subtract(const Duration(days: 2))), isTrue);
+      fit.restartRamadan();
+      expect(fit.ramadanCount.owed, 0);
+    });
+
+    test('con Ramadán el desayuno y la cena se llaman Suhoor e Iftar, salvo nombre propio', () {
+      setAppLanguage('es');
+      fit.nutritionBeta = true;
+      fit.setTracker(Tracker.fasting, true);
+      fit.setRamadan(true);
+      expect(fit.mealLabel(Meal.breakfast), 'Suhoor');
+      expect(fit.mealLabel(Meal.dinner), 'Iftar');
+      fit.setRamadan(false);
+      expect(fit.mealLabel(Meal.dinner), isNot('Iftar'));
+    });
   });
 
   group('archivar comida', () {
@@ -1139,6 +1192,44 @@ void main() {
       fit.applyBackup(json);
       expect(fit.archivedSupps, {s.id});
       expect(fit.activeSupplements, isEmpty);
+    });
+  });
+
+  group('#394 hierro y potasio', () {
+    test('viene apagado y no se enciende solo al cargar ajustes viejos', () {
+      expect(fit.trackerOn(Tracker.minerals), isFalse);
+      final old = fit.toJson();
+      final n = Map<String, dynamic>.from(old['nutrition'] as Map);
+      n['trackers'] = [for (final t in Tracker.values) if (t != Tracker.minerals && fit.trackerOn(t)) t.name];
+      old['nutrition'] = n;
+      expect(fit.tryApplyBackup(old), isTrue);
+      expect(fit.trackerOn(Tracker.minerals), isFalse);
+    });
+
+    test('se guardan, se suman y cuentan cuántos alimentos del día los traen', () {
+      const lentils = Macros(kcal: 230, protein: 18, carbs: 40, fat: 1, iron: 6.6, potassium: 738);
+      expect(Macros.fromJson(lentils.toJson()).iron, 6.6);
+      expect(Macros.fromJson(lentils.toJson()).potassium, 738);
+      expect(Macros.fromJson(whey.toJson()).hasMinerals, isFalse);
+      fit.logFood(fit.saveFood(name: 'Lentejas', serving: '1 plato', macros: lentils));
+      fit.logFood(fit.saveFood(name: 'Whey', serving: '30 g', macros: whey), servings: 2);
+      final day = DateTime.now();
+      expect(fit.totalOn(day).iron, closeTo(6.6, 0.001));
+      expect(fit.totalOn(day).potassium, 738);
+      final c = fit.mineralsCoverage(day);
+      expect((c.known, c.total), (1, 2));
+    });
+
+    test('las metas salen del perfil hasta que pones las tuyas, y viajan en la copia', () {
+      fit.updateProfile(sex: 'female');
+      expect(fit.ironGoal(fit.nutritionGoals), 18);
+      fit.updateProfile(sex: 'male');
+      expect(fit.ironGoal(fit.nutritionGoals), 8);
+      expect(fit.potassiumGoal(fit.nutritionGoals), 3400);
+      fit.setNutritionGoals(fit.nutritionGoals.copyWith(iron: 12, potassium: 4000));
+      final g = NutritionGoals.fromJson(fit.nutritionGoals.toJson());
+      expect((g.iron, g.potassium), (12, 4000));
+      expect(NutritionGoals.fromJson(const NutritionGoals().toJson()).iron, 0);
     });
   });
 }

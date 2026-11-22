@@ -459,7 +459,7 @@ void main() {
 
     test('el prompt pide los campos opcionales sin hacerlos obligatorios', () {
       final p = buildMealAiPrompt(brief);
-      expect(p, contains('"sodium" and "cholesterol" in milligrams'));
+      expect(p, contains('"sodium", "cholesterol", "iron" and "potassium" in milligrams'));
       expect(p, contains('leave the key out otherwise'));
     });
   });
@@ -486,6 +486,13 @@ void main() {
       expect(pick.food.sodium, closeTo(40, 0.001));
     });
 
+    test('#394 lee hierro y potasio y los pasa de 100 g a la ración', () {
+      final pick = parseFoodAi('{"food": {"name": "Lentejas", "grams": 200, "per100": {"kcal": 116, "protein": 9, "carbs": 20, "fat": 0.4, "iron": 3.3, "potassium": 369}}}');
+      expect(pick, isNotNull);
+      expect([pick!.food.iron, pick.food.potassium], [3.3, 369]);
+      expect(buildFoodAiPrompt('Spanish'), contains('"iron" and "potassium" in milligrams'));
+    });
+
     test('sin valores no rellena nada', () {
       expect(parseFoodAi('Mándame la etiqueta, una foto, un enlace o el nombre del alimento.'), isNull);
       expect(parseFoodAi('{"food": {"name": "Pan"}}'), isNull);
@@ -498,5 +505,32 @@ void main() {
       expect(p, contains('in Spanish'));
       expect(parseFoodAi(p), isNotNull);
     });
+  });
+
+  group('por qué no se ha podido leer', () {
+    test('solo texto, sin datos: la IA se ha negado o ha contestado en frase', () {
+      expect(diagnoseMealAi('Lo siento, no puedo ver la foto. ¿Me describes el plato?'), MealAiTrouble.noData);
+    });
+
+    test('un JSON a medias es una respuesta cortada', () {
+      expect(diagnoseMealAi('```json {"gymmane": "meal", "options": [{"items": [{"name": "Arroz", "grams": 150'),
+          MealAiTrouble.cut);
+    });
+
+    test('con datos completos pero raros, el aviso de siempre', () {
+      expect(diagnoseMealAi('{"hola": 1}'), MealAiTrouble.unknown);
+    });
+  });
+  test('#417 el escáner manda un alimento o un apunte rápido con el mismo formato', () {
+    const food = '{"gymmane":"gymmane-food","v":1,"food":{"name":"Skyr · Arla","serving_name":"1 pot","grams":150,"liquid":false,"per100":{"kcal":63,"protein":11,"carbs":4,"fat":0.2,"sodium":40}}}';
+    final quick = food.replaceFirst('"v":1,', '"v":1,"mode":"quick",');
+    expect(isQuickFood(food), isFalse);
+    expect(isQuickFood(quick), isTrue);
+    final pick = parseFoodAi(quick)!;
+    expect(pick.food.name, 'Skyr · Arla');
+    expect(pick.food.grams, 150);
+    expect(pick.food.per100, isTrue);
+    expect(pick.food.kcal, 63);
+    expect(pick.serving, '1 pot');
   });
 }

@@ -112,6 +112,7 @@ class WearSnapshotBuilder {
           'name': session.exercises[exerciseIndex].name,
           'primary': session.exercises[exerciseIndex].primary,
           'linkedNext': session.exercises[exerciseIndex].linkedNext,
+          if (session.exercises[exerciseIndex].jumpNext) 'jumpNext': true,
           ...?displayFor?.call(session.exercises[exerciseIndex].id),
           'guide': ?customStepsFor?.call(session.exercises[exerciseIndex].id),
           'sets': [

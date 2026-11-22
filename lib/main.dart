@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/date_symbol_data_local.dart';
@@ -19,8 +21,11 @@ import 'services/screen_awake.dart';
 import 'state/fit_state.dart';
 import 'wear/link/wear_link_client.dart';
 import 'wear/link/wear_link_server.dart';
+import 'services/quick_tiles.dart';
+import 'services/watch_phone.dart';
 import 'wear/wear_app.dart';
 import 'wear/wear_surfaces.dart';
+import 'wear/wear_sync.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -53,17 +58,28 @@ Future<void> main() async {
 
   if (watch) {
     WearSurfaces.watch();
-    WearLinkClient.instance.attach();
+    if (const bool.fromEnvironment('GYMMANE_TEST_BUILD')) {
+      WearLinkClient.instance.attach();
+    } else {
+      unawaited(WearSync.instance.init());
+    }
     runApp(const WearApp());
+    GraphicsMode.watchFirstFrame();
     return;
   }
 
   fit.onWidgetsShouldUpdate = HomeWidgetBridge.update;
   NutritionWidgets.watch(HomeWidgetBridge.update);
   AutoBackup.instance.init();
-  WearLinkServer.instance.attach();
+  if (const bool.fromEnvironment('GYMMANE_TEST_BUILD')) {
+    WearLinkServer.instance.attach();
+  } else {
+    unawaited(WatchPhone.init());
+  }
+  unawaited(QuickTiles.init());
   runApp(const GymManeApp());
 
+  GraphicsMode.watchFirstFrame();
   WidgetsBinding.instance.addPostFrameCallback((_) => HomeWidgetBridge.update());
 }
 

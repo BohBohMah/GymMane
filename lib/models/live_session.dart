@@ -90,32 +90,41 @@ class SessionSet {
 }
 
 class SessionExercise {
-  SessionExercise(this.id, this.name, this.primary, this.sets, {this.linkedNext = false, this.swappedFrom});
+  SessionExercise(this.id, this.name, this.primary, this.sets,
+      {this.linkedNext = false, this.jumpNext = false, this.swappedFrom, this.slot});
   final String id;
   final String name;
   final String primary;
   final List<SessionSet> sets;
   bool linkedNext;
+  bool jumpNext;
   final String? swappedFrom;
+  String? slot;
+
+  String get routineSlot => slot ?? swappedFrom ?? id;
 
   bool get hasUndone => sets.any((s) => !s.done);
 
   Map<String, dynamic> toJson() => {
-    'id': id,
-    'n': name,
-    'p': primary,
-    's': sets.map((s) => s.toJson()).toList(),
-    if (linkedNext) 'l': true,
-    if (swappedFrom != null) 'sw': swappedFrom,
-  };
+        'id': id,
+        'n': name,
+        'p': primary,
+        's': sets.map((s) => s.toJson()).toList(),
+        if (linkedNext) 'l': true,
+        if (jumpNext) 'j': true,
+        if (swappedFrom != null) 'sw': swappedFrom,
+        if (slot != null) 'sl': slot,
+      };
   factory SessionExercise.fromJson(Map<String, dynamic> j) => SessionExercise(
-    j['id'] as String,
-    j['n'] as String,
-    j['p'] as String,
-    (j['s'] as List).map((e) => SessionSet.fromJson((e as Map).cast<String, dynamic>())).toList(),
-    linkedNext: j['l'] as bool? ?? false,
-    swappedFrom: j['sw'] as String?,
-  );
+        j['id'] as String,
+        j['n'] as String,
+        j['p'] as String,
+        (j['s'] as List).map((e) => SessionSet.fromJson((e as Map).cast<String, dynamic>())).toList(),
+        linkedNext: j['l'] as bool? ?? false,
+        jumpNext: j['j'] as bool? ?? false,
+        swappedFrom: j['sw'] as String?,
+        slot: j['sl'] as String?,
+      );
 }
 
 class WorkoutSession {
@@ -141,6 +150,8 @@ class WorkoutSession {
   int? summaryVolume;
   int? summarySets;
   int? summaryDuration;
+  DateTime? lastDoneAt;
+  int? lastDoneElapsed;
 
   int? get restRemaining {
     final frozen = restFrozen;
@@ -158,43 +169,45 @@ class WorkoutSession {
   }
 
   Map<String, dynamic> toJson() => {
-    'sid': sessionId,
-    'ex': exercises.map((e) => e.toJson()).toList(),
-    'i': currentIndex,
-    'c': complete,
-    if (manual) 'm': true,
-    if (deload) 'dl': true,
-    if (lightened) 'lt': true,
-    if (routineId != null) 'r': routineId,
-    if (name != null) 'n': name,
-    'at': loggedAt?.toIso8601String(),
-    if (restEndsAt != null) 're': restEndsAt!.toIso8601String(),
-    if (restFrozen != null) 'rf': restFrozen,
-    if (restSwitch && restEndsAt != null) 'rsw': true,
-    'sv': summaryVolume,
-    'ss': summarySets,
-    'sd': summaryDuration,
-  };
+        'sid': sessionId,
+        'ex': exercises.map((e) => e.toJson()).toList(),
+        'i': currentIndex,
+        'c': complete,
+        if (manual) 'm': true,
+        if (deload) 'dl': true,
+        if (lightened) 'lt': true,
+        if (routineId != null) 'r': routineId,
+        if (name != null) 'n': name,
+        'at': loggedAt?.toIso8601String(),
+        if (restEndsAt != null) 're': restEndsAt!.toIso8601String(),
+        if (restFrozen != null) 'rf': restFrozen,
+        if (restSwitch && restEndsAt != null) 'rsw': true,
+        'sv': summaryVolume,
+        'ss': summarySets,
+        'sd': summaryDuration,
+        if (lastDoneAt != null) 'ld': lastDoneAt!.toIso8601String(),
+        if (lastDoneElapsed != null) 'le': lastDoneElapsed,
+      };
 
-  factory WorkoutSession.fromJson(Map<String, dynamic> j) =>
-      WorkoutSession(
-          sessionId: j['sid'] is String && (j['sid'] as String).isNotEmpty ? j['sid'] as String : null,
-        )
-        ..exercises = (j['ex'] as List)
-            .map((e) => SessionExercise.fromJson((e as Map).cast<String, dynamic>()))
-            .toList()
-        ..currentIndex = (j['i'] as num?)?.toInt() ?? 0
-        ..complete = j['c'] as bool? ?? false
-        ..manual = j['m'] as bool? ?? false
-        ..deload = j['dl'] as bool? ?? false
-        ..lightened = j['lt'] as bool? ?? false
-        ..routineId = j['r'] as String?
-        ..name = j['n'] as String?
-        ..loggedAt = DateTime.tryParse((j['at'] as String?) ?? '')
-        ..restEndsAt = DateTime.tryParse((j['re'] as String?) ?? '')
-        ..restFrozen = (j['rf'] as num?)?.toInt()
-        ..restSwitch = j['rsw'] as bool? ?? false
-        ..summaryVolume = (j['sv'] as num?)?.toInt()
-        ..summarySets = (j['ss'] as num?)?.toInt()
-        ..summaryDuration = (j['sd'] as num?)?.toInt();
+  factory WorkoutSession.fromJson(Map<String, dynamic> j) => WorkoutSession(
+        sessionId: j['sid'] is String && (j['sid'] as String).isNotEmpty ? j['sid'] as String : null,
+      )
+    ..exercises =
+        (j['ex'] as List).map((e) => SessionExercise.fromJson((e as Map).cast<String, dynamic>())).toList()
+    ..currentIndex = (j['i'] as num?)?.toInt() ?? 0
+    ..complete = j['c'] as bool? ?? false
+    ..manual = j['m'] as bool? ?? false
+    ..deload = j['dl'] as bool? ?? false
+    ..lightened = j['lt'] as bool? ?? false
+    ..routineId = j['r'] as String?
+    ..name = j['n'] as String?
+    ..loggedAt = DateTime.tryParse((j['at'] as String?) ?? '')
+    ..restEndsAt = DateTime.tryParse((j['re'] as String?) ?? '')
+    ..restFrozen = (j['rf'] as num?)?.toInt()
+    ..restSwitch = j['rsw'] as bool? ?? false
+    ..summaryVolume = (j['sv'] as num?)?.toInt()
+    ..summarySets = (j['ss'] as num?)?.toInt()
+    ..summaryDuration = (j['sd'] as num?)?.toInt()
+    ..lastDoneAt = DateTime.tryParse((j['ld'] as String?) ?? '')
+    ..lastDoneElapsed = (j['le'] as num?)?.toInt();
 }

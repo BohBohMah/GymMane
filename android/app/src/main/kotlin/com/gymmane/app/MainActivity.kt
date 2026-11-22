@@ -31,6 +31,7 @@ class MainActivity : FlutterActivity() {
 
     override fun getFlutterShellArgs(): FlutterShellArgs {
         val args = super.getFlutterShellArgs()
+        GraphicsMode.starting(this)
         if (GraphicsMode.compat(this)) args.add(GraphicsMode.DISABLE_IMPELLER)
         return args
     }
@@ -44,6 +45,10 @@ class MainActivity : FlutterActivity() {
                 "state" -> result.success(
                     mapOf("compat" to GraphicsMode.compat(this), "detected" to GraphicsMode.detected(this)),
                 )
+                "ready" -> {
+                    GraphicsMode.ready(this)
+                    result.success(null)
+                }
                 "set" -> {
                     result.success(null)
                     val on = call.argument<Boolean>("compat") ?: false
@@ -159,6 +164,16 @@ class MainActivity : FlutterActivity() {
                     result.success(am.isLowRamDevice || info.totalMem < 3_500_000_000L)
                 }
                 "headphones" -> result.success(headphonesConnected())
+                "openApp" -> {
+                    val target = call.argument<String>("package")
+                    val launch = target?.let { packageManager.getLaunchIntentForPackage(it) }
+                    if (launch == null) {
+                        result.success(false)
+                    } else {
+                        launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        result.success(runCatching { startActivity(launch) }.isSuccess)
+                    }
+                }
                 "maxRefresh" -> result.success(maxRefreshRate())
                 "setHighRefresh" -> {
                     setHighRefresh(call.argument<Boolean>("on") ?: false)
@@ -176,6 +191,8 @@ class MainActivity : FlutterActivity() {
         VoiceBridge.attach(this, MethodChannel(messenger, VoiceBridge.CHANNEL))
         WearSurfaces.attach(this, MethodChannel(messenger, WearSurfaces.CHANNEL))
         WearLinkBridge.attach(this, MethodChannel(messenger, WearLinkBridge.CHANNEL))
+        WatchLinkBridge.attach(this, MethodChannel(messenger, WatchLinkBridge.CHANNEL))
+        QuickTiles.attach(this, MethodChannel(messenger, QuickTiles.CHANNEL))
     }
 
     private fun currentDisplay(): android.view.Display? =
@@ -273,6 +290,7 @@ class MainActivity : FlutterActivity() {
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         if (WearLinkBridge.onPermissionResult(requestCode, grantResults)) return
         if (HealthBridge.onPermissionResult(requestCode, grantResults)) return
+        if (WatchLinkBridge.onPermissionResult(requestCode, grantResults)) return
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
     }
 
@@ -298,6 +316,7 @@ class MainActivity : FlutterActivity() {
         openChannel = null
         NfcBridge.detach(this)
         WearLinkBridge.detach(this)
+        WatchLinkBridge.detach()
         LiveNotifier.dart = null
         HealthBridge.channel = null
         if (isFinishing) LiveNotifier.cancel(this)

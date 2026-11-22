@@ -105,19 +105,67 @@ void main() {
       expect(set.sec, inInclusiveRange(299, 301));
     });
 
-    test('un aguante terminado antes sigue guardando lo planeado', () {
+    test('un aguante terminado antes guarda lo aguantado (#404)', () {
       final plank = fit.matchExerciseByName('Plank')!.id;
       fit.startRoutine(routineOf([plank]));
       fit.endCountdown();
       fit.setExerciseMode(plank, 'time');
-      final planned = fit.session!.exercises.first.sets.first.sec;
+      fit.session!.exercises.first.sets.first.sec = 30;
       fit.startHold(0, 0);
-      final start = DateTime.now().subtract(const Duration(seconds: 10));
+      final start = DateTime.now().subtract(const Duration(seconds: 19));
       fit.holdStartsAt = start;
       fit.holdEndsAt = start.add(Duration(seconds: fit.holdTotal));
       fit.toggleHoldPause();
       fit.completeHold();
-      expect(fit.session!.exercises.first.sets.first.sec, planned);
+      expect(fit.session!.exercises.first.sets.first.sec, inInclusiveRange(18, 20));
+    });
+
+    test('con «Encadenar series por tiempo», tras el descanso arranca la siguiente sola', () {
+      final plank = fit.matchExerciseByName('Plank')!.id;
+      fit.startRoutine(routineOf([plank]));
+      fit.endCountdown();
+      fit.setExerciseMode(plank, 'time');
+      for (final st in fit.session!.exercises.first.sets) {
+        st.sec = 30;
+      }
+      expect(fit.session!.exercises.first.sets.length, greaterThan(1));
+      fit.toggleAutoHold();
+      fit.startHold(0, 0);
+      fit.completeHold();
+      expect(fit.session!.exercises.first.sets.first.done, isTrue);
+      expect(fit.holding, isFalse, reason: 'primero descansa');
+      fit.session!.restEndsAt = DateTime.now().subtract(const Duration(seconds: 1));
+      fit.restElapsed();
+      expect(fit.holding, isTrue);
+      expect(fit.holdSet, 1);
+      fit.stopHold();
+    });
+
+    test('sin el ajuste, tras el descanso no arranca nada', () {
+      final plank = fit.matchExerciseByName('Plank')!.id;
+      fit.startRoutine(routineOf([plank]));
+      fit.endCountdown();
+      fit.setExerciseMode(plank, 'time');
+      fit.startHold(0, 0);
+      fit.completeHold();
+      fit.session!.restEndsAt = DateTime.now().subtract(const Duration(seconds: 1));
+      fit.restElapsed();
+      expect(fit.holding, isFalse);
+    });
+
+    test('a un segundo del final cuenta como completo', () {
+      final plank = fit.matchExerciseByName('Plank')!.id;
+      fit.startRoutine(routineOf([plank]));
+      fit.endCountdown();
+      fit.setExerciseMode(plank, 'time');
+      fit.session!.exercises.first.sets.first.sec = 30;
+      fit.startHold(0, 0);
+      final start = DateTime.now().subtract(const Duration(seconds: 29));
+      fit.holdStartsAt = start;
+      fit.holdEndsAt = start.add(Duration(seconds: fit.holdTotal));
+      fit.toggleHoldPause();
+      fit.completeHold();
+      expect(fit.session!.exercises.first.sets.first.sec, 30);
     });
   });
 
@@ -527,6 +575,22 @@ void main() {
       held([45, 40, 45]);
       expect(fit.nextHoldSeconds(plank()), 45);
       expect(fit.holdGoesUp(plank()), isFalse);
+      fit.sessions.clear();
+      held([19, 30, 30]);
+      expect(fit.nextHoldSeconds(plank()), 30);
+      expect(fit.holdGoesUp(plank()), isFalse);
+    });
+
+    test('una rutina con segundos propios abre con los de la progresión (#404)', () {
+      held([30, 30, 30]);
+      fit.cycleHoldStep(plank(), 1);
+      fit.cycleHoldStep(plank(), 1);
+      final r = fit.createRoutine('Core');
+      fit.toggleRoutineExercise(r, plank());
+      fit.setPlannedSets(r, plank(), const [PlannedSet(sec: 30), PlannedSet(sec: 30), PlannedSet(sec: 30)]);
+      fit.startRoutine(fit.routines.firstWhere((x) => x.id == r));
+      expect(fit.session!.exercises.single.sets.map((s) => s.sec), everyElement(40));
+      expect(fit.nextTargetLabel(plank()), contains('40'));
     });
 
     test('la sesión abre con los segundos nuevos y el ajuste se guarda', () {

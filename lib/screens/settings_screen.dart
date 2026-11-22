@@ -20,6 +20,7 @@ import '../services/graphics_mode.dart';
 import '../services/alarm_store.dart';
 import '../services/auto_backup.dart';
 import '../services/backup_zip.dart';
+import '../services/fit_file.dart';
 import '../services/fitnotes_backup.dart';
 import '../services/home_widget_bridge.dart';
 import '../services/notif_sound.dart';
@@ -31,9 +32,13 @@ import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
 import '../services/app_icon.dart';
 import '../services/nfc_tags.dart';
+import '../services/quick_tiles.dart';
+import '../services/watch_link.dart';
 import 'help_topics.dart';
 import '../widgets/app_icon_sheet.dart';
 import '../widgets/nfc_sheet.dart';
+import '../widgets/quick_tiles_sheet.dart';
+import '../widgets/watch_sheet.dart';
 import '../widgets/auto_backup_sheet.dart';
 import '../widgets/body_rulers.dart';
 import '../widgets/dialogs.dart';
@@ -174,6 +179,10 @@ class SettingsScreen extends StatelessWidget {
                   _prefRow(gc, PhosphorIconsRegular.scales, t.unitsLabel, SegToggle([
                     SegOption('kg', fit.units == 'kg', () => fit.setUnits('kg')),
                     SegOption('lb', fit.units == 'lb', () => fit.setUnits('lb')),
+                  ])),
+                  _prefRow(gc, PhosphorIconsRegular.ruler, t.lengthUnitsLabel, SegToggle([
+                    SegOption('cm', !fit.isInches, () => fit.setLengthUnits('cm')),
+                    SegOption('in', fit.isInches, () => fit.setLengthUnits('in')),
                   ])),
                   _choiceRow(
                     context,
@@ -455,6 +464,12 @@ class SettingsScreen extends StatelessWidget {
                   ),
                   GestureDetector(
                     behavior: HitTestBehavior.opaque,
+                    onTap: fit.toggleAutoHold,
+                    child: _prefRow(gc, PhosphorIconsRegular.hourglassMedium, t.autoHold,
+                        TinySwitch(on: fit.autoHold), hint: t.autoHoldHint),
+                  ),
+                  GestureDetector(
+                    behavior: HitTestBehavior.opaque,
                     onTap: fit.toggleStartCountdown,
                     child: _prefRow(gc, PhosphorIconsRegular.timer, t.countdownSetting,
                         TinySwitch(on: fit.startCountdown), hint: t.countdownHint),
@@ -503,6 +518,18 @@ class SettingsScreen extends StatelessWidget {
                           Icon(PhosphorIconsRegular.caretRight, size: 15, color: gc.textTertiary),
                         ]),
                         hint: t.nfcRowHint,
+                      ),
+                    ),
+                  if (QuickTiles.available)
+                    GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () => showQuickTilesSheet(context),
+                      child: _prefRow(
+                        gc,
+                        PhosphorIconsRegular.squaresFour,
+                        t.qsRow,
+                        Icon(PhosphorIconsRegular.caretRight, size: 15, color: gc.textTertiary),
+                        hint: t.qsRowHint,
                       ),
                     ),
           ]),
@@ -671,6 +698,12 @@ class SettingsScreen extends StatelessWidget {
                   ),
                   GestureDetector(
                     behavior: HitTestBehavior.opaque,
+                    onTap: fit.toggleRestGlow,
+                    child: _prefRow(gc, PhosphorIconsRegular.sunDim, t.restGlowSetting,
+                        TinySwitch(on: fit.restGlow), hint: t.restGlowHint),
+                  ),
+                  GestureDetector(
+                    behavior: HitTestBehavior.opaque,
                     onTap: fit.toggleToastSound,
                     child: _prefRow(gc, PhosphorIconsRegular.bellSimple, t.toastSoundSetting,
                         TinySwitch(on: fit.toastSound), hint: t.toastSoundHint),
@@ -738,6 +771,14 @@ class SettingsScreen extends StatelessWidget {
                         hint: t.nutritionBetaHint,
                         badge: BetaTag(t.sectionBeta, small: true)),
                   ),
+                  GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () => fit.setRecoveryOn(!fit.recoveryOn),
+                    child: _prefRow(gc, PhosphorIconsRegular.thermometerSimple, t.recoveryTitle,
+                        TinySwitch(on: fit.recoveryOn),
+                        hint: t.recoverySettingHint,
+                        badge: BetaTag(t.sectionBeta, small: true)),
+                  ),
 
           ]),
           const SizedBox(height: 28),
@@ -786,7 +827,16 @@ class SettingsScreen extends StatelessWidget {
               (PhosphorIconsRegular.person, t.addBodyWidget, () => _addWidget(context, 'BodyWidgetProvider')),
               (PhosphorIconsRegular.checkCircle, t.addTodayWidget, () => _addWidget(context, 'TodayWidgetProvider')),
               (PhosphorIconsRegular.calendarCheck, t.addWeekWidget, () => _addWidget(context, 'WeekWidgetProvider')),
-          ], hints: [t.widgetHintActivity, t.widgetHintStats, t.widgetHintBody, t.widgetHintToday, t.widgetHintWeek]),
+              if (!kIsWeb && Platform.isAndroid)
+                (PhosphorIconsRegular.listBullets, t.addMusclesWidget, () => _addWidget(context, 'MusclesWidgetProvider')),
+          ], hints: [
+            t.widgetHintActivity,
+            t.widgetHintStats,
+            t.widgetHintBody,
+            t.widgetHintToday,
+            t.widgetHintWeek,
+            if (!kIsWeb && Platform.isAndroid) t.widgetHintMuscles,
+          ]),
           const SizedBox(height: 22),
           const WidgetShowcase(),
         ];
@@ -805,11 +855,15 @@ class SettingsScreen extends StatelessWidget {
               (PhosphorIconsRegular.downloadSimple, t.importBackup, () => _importBackup(context)),
               if (AutoBackup.instance.supported)
                 (PhosphorIconsRegular.clockCounterClockwise, t.autoBackup, () => showAutoBackupSheet(context)),
-              (PhosphorIconsRegular.watch, t.wearLinkPhoneTitle, () => WearLinkSettings.show(context)),
+              if (const bool.fromEnvironment('GYMMANE_TEST_BUILD'))
+                (PhosphorIconsRegular.watch, t.wearLinkPhoneTitle, () => WearLinkSettings.show(context))
+              else if (WatchLink.instance.available)
+                (PhosphorIconsRegular.watch, t.watchRow, () => showWatchSheet(context)),
               (PhosphorIconsRegular.export, t.stravaRow, () => showStravaSheet(context)),
               (PhosphorIconsRegular.barbell, t.clearWorkouts, () => _clearWorkouts(context)),
               (PhosphorIconsRegular.trash, t.resetData, () => _resetAll(context)),
-          ], danger: AutoBackup.instance.supported ? 7 : 6),
+          ], danger: (AutoBackup.instance.supported ? 6 : 5) +
+              (const bool.fromEnvironment('GYMMANE_TEST_BUILD') || WatchLink.instance.available ? 1 : 0)),
         ];
       default:
         return [
@@ -902,7 +956,9 @@ class SettingsScreen extends StatelessWidget {
         (t.deloadSetting, PhosphorIconsRegular.feather),
         (t.voiceSetting, PhosphorIconsRegular.waveform),
         if (NfcTags.available) (t.nfcRow, PhosphorIconsRegular.contactlessPayment),
+        if (QuickTiles.available) (t.qsRow, PhosphorIconsRegular.squaresFour),
         (t.autoAdvance, PhosphorIconsRegular.skipForward),
+        (t.autoHold, PhosphorIconsRegular.hourglassMedium),
         (t.countdownSetting, PhosphorIconsRegular.timer),
         (t.keepScreenOn, PhosphorIconsRegular.sun),
         (t.checkInSetting, PhosphorIconsRegular.moon),
@@ -920,6 +976,7 @@ class SettingsScreen extends StatelessWidget {
         (t.notifSoundSetting, PhosphorIconsRegular.musicNotes),
         (t.alarmSound, PhosphorIconsRegular.speakerHigh),
         (t.alarmStyleTitle, PhosphorIconsRegular.vibrate),
+        (t.restGlowSetting, PhosphorIconsRegular.sunDim),
         (t.toastSoundSetting, PhosphorIconsRegular.bellSimple),
       ]),
       _Category('home', PhosphorIconsRegular.house, _sectionTitle('home'), [
@@ -942,6 +999,7 @@ class SettingsScreen extends StatelessWidget {
         ]),
       _Category('beta', PhosphorIconsRegular.flask, _sectionTitle('beta'), [
         (t.nutritionBeta, PhosphorIconsRegular.forkKnife),
+        (t.recoveryTitle, PhosphorIconsRegular.thermometerSimple),
       ]),
       _Category('data', PhosphorIconsRegular.database, _sectionTitle('data'), [
         (t.exportCsv, PhosphorIconsRegular.fileCsv),
@@ -949,8 +1007,11 @@ class SettingsScreen extends StatelessWidget {
         (t.exportBackup, PhosphorIconsRegular.fileZip),
         (t.importBackup, PhosphorIconsRegular.downloadSimple),
         (t.autoBackup, PhosphorIconsRegular.clockCounterClockwise),
+        if (const bool.fromEnvironment('GYMMANE_TEST_BUILD'))
+          (t.wearLinkPhoneTitle, PhosphorIconsRegular.watch)
+        else if (WatchLink.instance.available)
+          (t.watchRow, PhosphorIconsRegular.watch),
         (t.importFromApp, PhosphorIconsRegular.arrowSquareIn),
-        (t.wearLinkPhoneTitle, PhosphorIconsRegular.watch),
         (t.stravaRow, PhosphorIconsRegular.export),
         (t.clearWorkouts, PhosphorIconsRegular.barbell),
         (t.resetData, PhosphorIconsRegular.trash),
@@ -1170,7 +1231,7 @@ class SettingsScreen extends StatelessWidget {
                   detail: switch (l) {
                     'lite' => t.perfLiteHint,
                     'balanced' => t.perfBalancedHint,
-                    _ => fit.canHighRefresh ? t.perfMaxHint(hz) : t.perfMaxHintNoHz,
+                    _ => t.perfMaxHintNoHz,
                   },
                   selected: level == l,
                   onTap: () {
@@ -1416,6 +1477,7 @@ class SettingsScreen extends StatelessWidget {
                       ('StrongLifts', '.csv'),
                       ('FitNotes', '.fitnotes'),
                       ('openGym', '.json · .zip'),
+                      ('Garmin', '.fit · .zip'),
                       ('CSV', ''),
                     ].indexed) ...[
                       if (i > 0) Divider(height: 1, thickness: 1, indent: 16, endIndent: 16, color: gc.border),
@@ -1485,15 +1547,30 @@ class SettingsScreen extends StatelessWidget {
 
   Future<void> _importFromApp(BuildContext context) async {
     Uint8List? bytes;
+    final fits = <Uint8List>[];
     try {
-      final result = await FilePicker.platform.pickFiles(withData: true);
-      if (result == null) return;
-      final picked = result.files.single;
-      bytes = picked.bytes ?? (picked.path == null ? null : await File(picked.path!).readAsBytes());
+      final result = await FilePicker.platform.pickFiles(withData: true, allowMultiple: true);
+      if (result == null || result.files.isEmpty) return;
+      for (final picked in result.files) {
+        final read = picked.bytes ?? (picked.path == null ? null : await File(picked.path!).readAsBytes());
+        if (read == null) continue;
+        if (looksLikeFit(read)) {
+          fits.add(read);
+        } else {
+          bytes ??= read;
+        }
+      }
     } catch (_) {
       bytes = null;
     }
     if (!context.mounted) return;
+    if (bytes != null && fits.isEmpty && bytes.length > 2 && bytes[0] == 0x50 && bytes[1] == 0x4B) {
+      fits.addAll(fitFilesFromZip(bytes));
+    }
+    if (fits.isNotEmpty) {
+      _applyImport(context, parseFitFiles(fits, unknownName: t.recapCardLift));
+      return;
+    }
     if (bytes == null) {
       _snack(context, t.importReadFailed);
       return;

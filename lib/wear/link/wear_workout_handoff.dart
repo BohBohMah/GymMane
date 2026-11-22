@@ -74,6 +74,8 @@ Map<String, dynamic>? watchWorkoutDraft(
           'name': ex.name,
           'primary': ex.primary,
           'linkedNext': ex.linkedNext,
+          if (ex.jumpNext) 'jumpNext': true,
+          'slot': ?ex.slot,
           'weightUnit': config['units'],
           'weightStepKg': config['stepKg'],
           'distanceUnit': config['distance'],
@@ -126,7 +128,7 @@ Map<String, dynamic> wearHandoffPayload(Map<String, dynamic> snapshot) {
               goal: set['goal'] as String?,
               note: set['note'] as String? ?? '',
             )..half = set['half'] == true,
-        ], linkedNext: ex['linkedNext'] == true),
+        ], linkedNext: ex['linkedNext'] == true, jumpNext: ex['jumpNext'] == true, slot: ex['slot'] as String?),
     ];
   final rest = snapshot['rest'] as Map?;
   session.restEndsAt = DateTime.tryParse(rest?['endsAt'] as String? ?? '');

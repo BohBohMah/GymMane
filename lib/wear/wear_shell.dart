@@ -10,12 +10,14 @@ import '../l10n/l10n.dart';
 import '../models/live_session.dart';
 import '../models/workout.dart';
 import '../services/screen_awake.dart';
+import '../services/watch_link.dart';
 import '../state/fit_state.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
 import '../widgets/timer_panel.dart';
 import '../widgets/ui_kit.dart' show sentenceCase;
 import 'companion/wear_link_screen.dart';
+import 'wear_sync.dart';
 
 class WearRotary {
   WearRotary._();
@@ -176,6 +178,7 @@ class _WearShellState extends State<WearShell> with WidgetsBindingObserver {
     }
     if (state == AppLifecycleState.resumed) {
       fit.syncRest();
+      unawaited(WearSync.instance.sync());
       _wake();
     }
   }
@@ -896,12 +899,63 @@ class WearSettings extends StatelessWidget {
             ),
           ),
         ),
-        const SizedBox(height: 12),
-        WearButton(
-          label: t.wearLinkTitle,
-          icon: PhosphorIconsRegular.watch,
-          onTap: () => fit.pushRoute('link'),
-        ),
+      const SizedBox(height: 14),
+      _label(gc, t.wearSyncTitle),
+      ListenableBuilder(
+        listenable: Listenable.merge([WearSync.instance, WatchLink.instance]),
+        builder: (context, _) {
+          final sync = WearSync.instance;
+          final link = WatchLink.instance;
+          final at = sync.pulledAt;
+          final status = sync.busy || link.busy
+              ? t.wearSyncSearching
+              : !link.enabled && link.granted
+              ? t.wearSyncBluetoothOff
+              : link.lastOk == false
+                  ? t.wearSyncNotFound
+                  : at == null
+                      ? t.wearSyncNever
+                      : t.wearSyncLast('${t.shortDate(at)} · ${t.clockTime(at)}');
+          return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Center(
+              child: Text(status,
+                  textAlign: TextAlign.center,
+                  maxLines: 3,
+                  style: AppTheme.f(12.5, weight: FontWeight.w700, color: gc.text, height: 1.25)),
+            ),
+            if (sync.waiting > 0) ...[
+              const SizedBox(height: 4),
+              Center(
+                child: Text(t.wearSyncWaiting(sync.waiting),
+                    textAlign: TextAlign.center,
+                    maxLines: 3,
+                    style: AppTheme.f(11.5, weight: FontWeight.w600, color: gc.accent, height: 1.25)),
+              ),
+            ],
+            const SizedBox(height: 8),
+            if (link.available && !link.granted)
+              WearButton(
+                label: t.wearSyncAllow,
+                icon: PhosphorIconsBold.bluetooth,
+                onTap: () => unawaited(link.askPermission().then((ok) {
+                  if (ok) unawaited(sync.sync(manual: true));
+                })),
+              )
+            else
+              WearButton(
+                label: t.wearSyncNow,
+                icon: PhosphorIconsBold.arrowsClockwise,
+                onTap: sync.busy || link.busy ? null : () => unawaited(sync.sync(manual: true)),
+              ),
+            const SizedBox(height: 6),
+            Center(
+              child: Text(t.wearSyncHow,
+                  textAlign: TextAlign.center,
+                  style: AppTheme.f(11, weight: FontWeight.w500, color: gc.textTertiary, height: 1.3)),
+            ),
+          ]);
+        },
+      ),
       ],
     );
   }
