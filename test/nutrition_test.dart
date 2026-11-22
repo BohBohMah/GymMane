@@ -185,7 +185,7 @@ void main() {
       expect(fit.weightPaceStatus, isNull);
     });
 
-    test('mide kg y % por semana y lo compara con lo que buscas', () {
+    test('mide kg y % por semana y lo compara con lo que buscas', () async {
       weighIns([(14, 81), (7, 80.5), (0, 80)]);
       final pace = fit.weightPace!;
       expect(pace.kgPerWeek, closeTo(-0.5, 0.01));
@@ -201,7 +201,7 @@ void main() {
       fit.setWeightGoal(75);
       expect(fit.effectiveWeightAim, 'lose');
       fit.setWeightAim('hold');
-      fit.persistNow();
+      await fit.persistNow();
       fit.loadFromStore();
       expect(fit.weightAim, 'hold');
     });
@@ -214,14 +214,14 @@ void main() {
   });
 
   group('guardado', () {
-    test('todo sobrevive a cerrar la app', () {
+    test('todo sobrevive a cerrar la app', () async {
       final food = fit.saveFood(name: 'Whey', photo: 'food-x.png', serving: '30 g', macros: whey);
       fit.logFood(food, meal: Meal.breakfast);
       fit.addWater(750);
       final s = fit.addSupplement('Omega 3')!;
       fit.toggleSupplement(s.id);
       fit.setNutritionGoals(const NutritionGoals(kcal: 2500, protein: 170));
-      fit.persistNow();
+      await fit.persistNow();
 
       fit.loadFromStore();
       expect(fit.foods.single.photo, 'food-x.png');
@@ -377,7 +377,7 @@ void main() {
       expect(r.items.first.id, isNot(added.first.id));
     });
 
-    test('un plato archivado sale de la estantería y del buscador, y se recuerda', () {
+    test('un plato archivado sale de la estantería y del buscador, y se recuerda', () async {
       fit.logQuick('Avena', const Macros(kcal: 300), meal: Meal.breakfast);
       final r = fit.saveRecipe('Gachas', fit.entriesOn(DateTime.now()))!;
       fit.setRecipeArchived(r.id, true);
@@ -385,7 +385,7 @@ void main() {
       expect(fit.searchRecipes('gach'), isEmpty);
       expect(fit.archivedRecipeList.single.id, r.id);
 
-      fit.persistNow();
+      await fit.persistNow();
       fit.loadFromStore();
       expect(fit.isRecipeArchived(r.id), isTrue);
 
@@ -454,13 +454,13 @@ void main() {
       expect(fit.totalOn(DateTime.now()).kcal, 600);
     });
 
-    test('los favoritos se guardan, van primero los últimos y se van al borrar el alimento', () {
+    test('los favoritos se guardan, van primero los últimos y se van al borrar el alimento', () async {
       final mine = fit.saveFood(name: 'Whey', serving: '30 g', macros: whey);
       final egg = lib('Huevo');
       fit.toggleFavoriteFood(egg.id);
       fit.toggleFavoriteFood(mine.id);
       expect([for (final f in fit.favoriteFoodItems) f.id], [mine.id, egg.id]);
-      fit.persistNow();
+      await fit.persistNow();
       fit.loadFromStore();
       expect(fit.isFavoriteFood(egg.id), isTrue);
       fit.deleteFood(mine.id);
@@ -469,10 +469,10 @@ void main() {
       expect(fit.favoriteFoodItems, isEmpty);
     });
 
-    test('las comidas guardadas sobreviven a cerrar la app', () {
+    test('las comidas guardadas sobreviven a cerrar la app', () async {
       fit.logQuick('Tostada', const Macros(kcal: 200, fiber: 4));
       fit.saveRecipe('Merienda', fit.foodLog);
-      fit.persistNow();
+      await fit.persistNow();
       fit.loadFromStore();
       expect(fit.recipes.single.name, 'Merienda');
       expect(fit.recipes.single.total.fiber, 4);
@@ -533,9 +533,9 @@ void main() {
       expect(w.proteinMet, 1);
     });
 
-    test('el peso objetivo se guarda en kg', () {
+    test('el peso objetivo se guarda en kg', () async {
       fit.setWeightGoal(78.5);
-      fit.persistNow();
+      await fit.persistNow();
       fit.loadFromStore();
       expect(fit.weightGoalKg, 78.5);
       fit.setWeightGoal(0);
@@ -608,13 +608,13 @@ void main() {
       expect(fit.saveBatch(name: 'Con peso', items: [quick], cookedGrams: 300), isNotNull);
     });
 
-    test('comidas libres: crear, renombrar, mover y quitar sin perder lo apuntado', () {
+    test('comidas libres: crear, renombrar, mover y quitar sin perder lo apuntado', () async {
       final pre = fit.addMealSlot('Preentreno')!;
       fit.logQuick('Plátano', const Macros(kcal: 100), meal: pre.meal);
       fit.renameMealSlot(pre.meal, 'Pre');
       fit.moveMealSlot(pre.meal, -1);
       expect(fit.mealSlots[fit.mealSlots.length - 2].meal, pre.meal);
-      fit.persistNow();
+      await fit.persistNow();
       fit.loadFromStore();
       expect(fit.slotOf(pre.meal)?.name, 'Pre');
       expect(fit.removeMealSlot(pre.meal), isTrue);
@@ -629,14 +629,14 @@ void main() {
       expect(mealForHour(21), Meal.dinner);
     });
 
-    test('el aviso de suplementos se guarda y se apaga', () {
+    test('el aviso de suplementos se guarda y se apaga', () async {
       fit.addSupplement('Creatina');
       fit.setSupplementReminder(21 * 60 + 30);
-      fit.persistNow();
+      await fit.persistNow();
       fit.loadFromStore();
       expect(fit.supplementReminderMin, 21 * 60 + 30);
       fit.setSupplementReminder(null);
-      fit.persistNow();
+      await fit.persistNow();
       fit.loadFromStore();
       expect(fit.supplementReminderMin, isNull);
     });
@@ -660,12 +660,12 @@ void main() {
       expect(fit.foods.single.macros.kcal, 250);
     });
 
-    test('los rastreadores se apagan y se guardan', () {
+    test('los rastreadores se apagan y se guardan', () async {
       expect(fit.trackerOn(Tracker.water), isTrue);
       expect(fit.trackerOn(Tracker.quality), isFalse);
       fit.setTracker(Tracker.water, false);
       fit.setTracker(Tracker.quality, true);
-      fit.persistNow();
+      await fit.persistNow();
       fit.loadFromStore();
       expect(fit.trackerOn(Tracker.water), isFalse);
       expect(fit.trackerOn(Tracker.quality), isTrue);
@@ -732,7 +732,7 @@ void main() {
       fit.deleteMealPlan(b.id);
       expect(fit.mealWeek, {1: a.id});
 
-      fit.persistNow();
+      await fit.persistNow();
       fit.loadFromStore();
       expect(fit.mealPlans.single.itemsOf(Meal.dinner).single.name, contains('Huevo'));
       expect(fit.mealWeek, {1: fit.mealPlans.single.id});
@@ -842,14 +842,14 @@ void main() {
       expect(fit.mealPlans.map((p) => p.id), [b.id, a.id]);
     });
 
-    test('la nutrición viene encendida y se recuerda al apagarla', () {
+    test('la nutrición viene encendida y se recuerda al apagarla', () async {
       expect(fit.nutritionBeta, isTrue);
       fit.setNutritionBeta(false);
-      fit.persistNow();
+      await fit.persistNow();
       fit.loadFromStore();
       expect(fit.nutritionBeta, isFalse);
       fit.setNutritionBeta(true);
-      fit.persistNow();
+      await fit.persistNow();
       fit.loadFromStore();
       expect(fit.nutritionBeta, isTrue);
     });
@@ -873,13 +873,13 @@ void main() {
       expect(back.from, monday);
     });
 
-    test('el calendario del suplemento se guarda y la tarjeta solo cuenta los de hoy', () {
+    test('el calendario del suplemento se guarda y la tarjeta solo cuenta los de hoy', () async {
       final today = fit.nutritionDay;
       final notToday = (today.weekday % 7) + 1;
       final s = fit.addSupplement('Creatina', days: 1 << notToday, until: shiftDays(today, 30))!;
       fit.addSupplement('Vitamina D');
       expect(fit.supplementsDueOn(today).map((x) => x.name), ['Vitamina D']);
-      fit.persistNow();
+      await fit.persistNow();
       fit.loadFromStore();
       final again = fit.supplements.firstWhere((x) => x.id == s.id);
       expect(again.days, 1 << notToday);
@@ -960,7 +960,7 @@ void main() {
     });
   });
 
-  test('agua: se borra un trago suelto y los topes de azúcar y sodio se guardan', () {
+  test('agua: se borra un trago suelto y los topes de azúcar y sodio se guardan', () async {
     fit.addWater(250);
     fit.addWater(500);
     final sips = fit.waterSipsOn(DateTime.now());
@@ -968,7 +968,7 @@ void main() {
     fit.removeWaterSip(sips.first);
     expect(fit.waterOn(DateTime.now()), 500);
     fit.setNutritionGoals(fit.activeGoals.copyWith(sugar: 30, sodium: 1500, fiber: 35));
-    fit.persistNow();
+    await fit.persistNow();
     fit.loadFromStore();
     expect(fit.activeGoals.sugar, 30);
     expect(fit.activeGoals.sodium, 1500);
@@ -986,7 +986,7 @@ void main() {
   });
 
   group('#285 tipos de grasa en alimentos propios', () {
-    test('se guardan, se escalan al apuntar y sobreviven a reabrir', () {
+    test('se guardan, se escalan al apuntar y sobreviven a reabrir', () async {
       final food = fit.saveFood(
         name: 'Galletas',
         macros: const Macros(kcal: 200, protein: 3, carbs: 25, fat: 10, sat: 4, trans: 0.5, mono: 3, poly: 2),
@@ -998,7 +998,7 @@ void main() {
       expect(total.mono, 6);
       expect(total.poly, 4);
 
-      fit.persistNow();
+      await fit.persistNow();
       fit.loadFromStore();
       final again = fit.foodById(food.id)!.macros;
       expect(again.trans, 0.5);
@@ -1012,14 +1012,14 @@ void main() {
   });
 
   group('categorías propias', () {
-    test('se crean, se asignan, filtran y vuelven al reabrir', () {
+    test('se crean, se asignan, filtran y vuelven al reabrir', () async {
       final g = fit.addFoodGroup('Platos preparados');
       expect(fit.addFoodGroup('  platos PREPARADOS '), g, reason: 'el mismo nombre no duplica');
       final fish = fit.saveFood(name: 'Merluza congelada', macros: const Macros(kcal: 90, protein: 18), group: g);
       fit.saveFood(name: 'Manzana', macros: const Macros(kcal: 52));
       expect(fit.searchFoods('', group: g).map((f) => f.id), [fish.id]);
       expect(fit.foodsInGroup(g), hasLength(1));
-      fit.persistNow();
+      await fit.persistNow();
       fit.loadFromStore();
       expect(fit.foodGroupById(g)!.name, 'Platos preparados');
       expect(fit.foodById(fish.id)!.group, g);
@@ -1130,7 +1130,7 @@ void main() {
       expect(fit.fasts, isEmpty);
     });
 
-    test('Ramadán cuenta ayunos y días por recuperar, y se guarda', () {
+    test('Ramadán cuenta ayunos y días por recuperar, y se guarda', () async {
       final now = DateTime.now();
       final today = DateTime(now.year, now.month, now.day);
       fit.setRamadan(true);
@@ -1139,7 +1139,7 @@ void main() {
       fit.toggleRamadanSkip(today.subtract(const Duration(days: 2)));
       expect(fit.ramadanDay, 5);
       expect(fit.ramadanCount, (fasted: now.isBefore(fit.ramadanAt(today, 1)) ? 3 : 4, owed: 1));
-      fit.persistNow();
+      await fit.persistNow();
       fit.loadFromStore();
       expect(fit.ramadan, isTrue);
       expect((fit.suhoorMinute, fit.iftarMinute), (0, 1));

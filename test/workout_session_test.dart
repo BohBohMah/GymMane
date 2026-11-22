@@ -96,10 +96,10 @@ void main() {
       return DateTime(n.year, n.month, n.day + offset, 10);
     }
 
-    test('el ajuste se guarda y por defecto son tarjetas', () {
+    test('el ajuste se guarda y por defecto son tarjetas', () async {
       expect(fit.sessionLayout, 'cards');
       fit.setSessionLayout('list');
-      fit.persistNow();
+      await fit.persistNow();
       fit.sessionLayout = 'cards';
       fit.loadFromStore();
       expect(fit.listLayout, isTrue);

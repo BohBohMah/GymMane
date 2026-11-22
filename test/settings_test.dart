@@ -19,10 +19,10 @@ void main() {
       fit.onboarded = true;
     });
 
-    test('la luz al acabar el descanso viene apagada y se recuerda', () {
+    test('la luz al acabar el descanso viene apagada y se recuerda', () async {
       expect(fit.restGlow, isFalse);
       fit.toggleRestGlow();
-      fit.persistNow();
+      await fit.persistNow();
       fit.loadFromStore();
       expect(fit.restGlow, isTrue);
       expect(fit.toJson()['restGlow'], isTrue);
@@ -30,11 +30,11 @@ void main() {
       expect(fit.restGlow, isFalse);
     });
 
-    test('es un tema oscuro aparte y se recuerda', () {
+    test('es un tema oscuro aparte y se recuerda', () async {
       fit.setThemePref('amoled');
       expect(fit.dark, isTrue);
       expect(fit.themeMode, ThemeMode.dark);
-      fit.persistNow();
+      await fit.persistNow();
       fit.loadFromStore();
       expect(fit.themePref, 'amoled');
       fit.setThemePref('dark');
@@ -50,10 +50,10 @@ void main() {
       fit.onboarded = true;
     });
 
-    test('se recuerda al reiniciar', () {
+    test('se recuerda al reiniciar', () async {
       expect(fit.hideShots, isFalse);
       fit.toggleHideShots();
-      fit.persistNow();
+      await fit.persistNow();
       fit.hideShots = false;
       fit.loadFromStore();
       expect(fit.hideShots, isTrue);
@@ -74,9 +74,9 @@ void main() {
       if (fit.session != null) fit.saveAndExit();
     });
 
-    test('the theme can follow the phone and older backups still load', () {
+    test('the theme can follow the phone and older backups still load', () async {
       fit.setThemePref('system');
-      fit.persistNow();
+      await fit.persistNow();
       fit.loadFromStore();
       expect(fit.themePref, 'system');
       fit.applyBackup({'dark': false});
@@ -84,10 +84,10 @@ void main() {
       fit.setThemePref('dark');
     });
 
-    test('the rest alarm style is kept and handed to the alarm', () {
+    test('the rest alarm style is kept and handed to the alarm', () async {
       fit.setAlarmStyle('vibrate');
       expect(RestAlarm.instance.style, 'vibrate');
-      fit.persistNow();
+      await fit.persistNow();
       fit.loadFromStore();
       expect(fit.alarmStyle, 'vibrate');
       fit.setAlarmStyle('loud');
@@ -109,24 +109,24 @@ void main() {
       fit.onboarded = true;
     });
 
-    test('se eligen, se recuerdan y lo raro no entra', () {
+    test('se eligen, se recuerdan y lo raro no entra', () async {
       expect(fit.textFactor, 1.0);
       fit.setTextSize('large');
       fit.setTextSize('giant');
       fit.setCalmMotion(true);
-      fit.persistNow();
+      await fit.persistNow();
       fit.loadFromStore();
       expect(fit.textSize, 'large');
       expect(fit.textFactor, greaterThan(1));
       expect(fit.calmMotion, isTrue);
     });
 
-    test('#307 los niveles de rendimiento mueven cada parte y tocar una lo deja personalizado', () {
+    test('#307 los niveles de rendimiento mueven cada parte y tocar una lo deja personalizado', () async {
       fit.maxRefresh = 120;
       fit.setPerfLevel('max');
       expect((fit.blurOn, fit.fineOn, fit.highRefresh, fit.calmMotion), (true, true, true, false));
       expect(fit.perfLevel, 'max');
-      fit.persistNow();
+      await fit.persistNow();
       fit.loadFromStore();
       expect(fit.perfLevel, 'max');
       fit.setFine(false);
