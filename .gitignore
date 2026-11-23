@@ -60,7 +60,6 @@ __pycache__/
 /android/key.properties
 
 # Not published
-/.opencode/
 doc-personal/
 tool/
 fdroid/
