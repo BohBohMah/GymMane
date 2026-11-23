@@ -1,5 +1,8 @@
 # GymMane Wear OS companion — handoff
 
+> Historical record. See the [companion guide](README.md) for the current build,
+> setup and verification status.
+
 ## Workout stop and watch finish/discard — 2026-11-17
 
 The owner reported that ending a workout on the phone left the watch running.
@@ -59,12 +62,10 @@ were not touched.
 | `build\app\outputs\flutter-apk\GymMane-test-phone.apk` | `com.gymmane.test.phone` | 114,473,829 | `56D5613811895B7258401EE6F318A870E6FE1BBD2AF188423A6DF01C21C1858D` |
 | `build\app\outputs\flutter-apk\GymMane-test-watch.apk` | `com.gymmane.test.wear` | 68,787,393 | `28C07AE3DA838F3B2F24B17EE65F75FA95CFB9288377489C4E29DB1311BB8795` |
 
-Exact build commands (PowerShell, from the repository root):
+Historical diagnostic build commands (PowerShell, from the repository root):
 
 ```powershell
-$env:JAVA_HOME='C:\Users\Claudio\.jdks\temurin-21.0.12.1'
-$env:GRADLE_OPTS='-Dorg.gradle.java.home=C:\Users\Claudio\.jdks\temurin-21.0.12.1'
-$FLUTTER='C:\Users\Claudio\AppData\Local\Temp\opencode\flutter-3.41\bin\flutter.bat'
+$FLUTTER=(Get-Command flutter -ErrorAction Stop).Source
 
 & $FLUTTER build apk --release -t lib\main.dart `
   --android-project-arg=gymmaneTestVariant=phone `
@@ -535,9 +536,8 @@ that nested rest and summary data survive the actual method codec.
 
 34 Wear tests and `flutter analyze` pass. A new non-debuggable watch test APK
 was built and checked for the correct test ID and absence of `INTERNET`, network
-state, scan and location permissions. It was not installed or tested on the
-watch by the assistant. The owner-observed link success and the two fixes still
-require physical confirmation.
+state, scan and location permissions. Physical verification of this build was
+pending at this checkpoint.
 
 ## 1h. Scroll fade and effort mode
 
@@ -567,8 +567,7 @@ The phone remains authoritative.
 manifests have no INTERNET, network state, scan or location permission. The
 watch now requests notification and connected-device foreground-service
 permissions. Icon visibility, background starts, standby, process termination
-and reconnection are **not hardware-verified**. The updated APKs were not
-installed by the assistant.
+and reconnection were pending hardware verification at this checkpoint.
 
 ## 1j. Follow-up investigation (2026-11-17)
 
@@ -621,7 +620,6 @@ The work is split into small local commits on `feature/wear-os-offline`:
 excludes added by an earlier `flutter pub get`). It is **not** part of the
 feature and was left untouched.
 
-`.opencode/` is local harness tooling. It is untracked and must not be committed.
 
 ## 3. Overall objective
 
@@ -832,10 +830,8 @@ frozen and update `IMPLEMENTATION_STATUS.md` only with new evidence.
 ## 10. Useful commands
 
 ```powershell
-# Environment (Windows, this machine)
-$env:JAVA_HOME='C:\Users\Claudio\.jdks\temurin-21.0.12.1'
-$env:GRADLE_OPTS='-Dorg.gradle.java.home=C:\Users\Claudio\.jdks\temurin-21.0.12.1'
-$FLUTTER='C:\Users\Claudio\AppData\Local\Temp\opencode\flutter-3.41\bin\flutter.bat'
+# Flutter SDK on PATH
+$FLUTTER=(Get-Command flutter -ErrorAction Stop).Source
 
 # Protocol unit tests (fast)
 .\android\gradlew.bat -p packages\wear_protocol test --console=plain

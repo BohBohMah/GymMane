@@ -1,5 +1,8 @@
 # GymMane Wear OS companion — implementation status
 
+> Historical record. See the [companion guide](README.md) for the current build,
+> setup and verification status.
+
 > Offline-first workout continuity requested 2026-11-17 is implemented in the
 > application code, including a confirmed watch-side finish/discard.
 > The watch durably saves the full active workout and ordered

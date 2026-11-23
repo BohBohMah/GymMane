@@ -1,5 +1,8 @@
 # GymMane local phone ↔ watch link — BLE feasibility
 
+> Historical record. See the [companion guide](README.md) for the current build,
+> setup and verification status.
+
 Status: **partial transport validation; end-to-end workout sync not verified.**
 This document separates what the build and the unit tests prove from what still
 needs a physical Android phone and a physical Wear OS watch.
@@ -213,9 +216,7 @@ hardware-verified until the full criteria above pass.
 ## 8. How to run the automated evidence
 
 ```powershell
-$env:JAVA_HOME='C:\Users\Claudio\.jdks\temurin-21.0.12.1'
-$env:GRADLE_OPTS='-Dorg.gradle.java.home=C:\Users\Claudio\.jdks\temurin-21.0.12.1'
-$FLUTTER='C:\Users\Claudio\AppData\Local\Temp\opencode\flutter-3.41\bin\flutter.bat'
+$FLUTTER=(Get-Command flutter -ErrorAction Stop).Source
 
 .\android\gradlew.bat -p packages\wear_protocol test --console=plain
 & $FLUTTER analyze

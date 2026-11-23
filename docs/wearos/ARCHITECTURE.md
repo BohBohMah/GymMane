@@ -1,9 +1,7 @@
 # GymMane Wear OS companion architecture
 
-Status: implemented and code-validated; **not verified on real BLE hardware**.
-See `IMPLEMENTATION_STATUS.md` for the current state, `BLE_FEASIBILITY.md` for
-the transport risks and the real-device procedure, and `HANDOFF.md` for a
-resumable work log.
+See the [companion guide](README.md) for the current build and verification
+status and the [device test procedure](REAL_DEVICE_TEST.md) for acceptance checks.
 
 ## Goal
 
@@ -18,7 +16,7 @@ no account, no server, no Data Layer, no HTTP or WebSocket, and no
 The feature is opt-in and off by default. When it is off, GymMane behaves
 exactly as it did before, including the existing standalone Wear experience.
 
-## Reuse decision: Flutter companion, not a second native app
+## Flutter companion entry point
 
 The repository already contains a complete Flutter Wear OS UI:
 
@@ -37,21 +35,12 @@ The alternatives were:
 | Second Flutter project | Medium | Good enough; the project already ships Flutter on Wear | Two pubspecs, two Android projects | Rejected |
 | Second Flutter entry point in this project | High: same theme, l10n, widgets, models and Gradle module | Good enough; same engine already used on Wear | One codebase, one test suite | **Chosen** |
 
-The companion is a separate Flutter entry point,
-`lib/main_wear_companion.dart`, built from the same Android module. In normal
-use the existing watch build already reaches the same screen from Settings →
-**Phone link** (`fit.pushRoute('link')`), so **no second APK is required in
-production**. The extra entry point is a development/preview convenience:
-
-```bash
-flutter run -t lib/main_wear_companion.dart -d <wear-device>
-```
-
-This keeps the official Flutter build untouched: the normal `flutter build apk`
-still produces the phone app, and the existing watch-mode branch in
-`lib/main.dart` still produces the standalone Wear app. The companion stores
-only the current snapshot and pending-operation journal; it does not duplicate
-the phone's workout library or history database.
+The experimental phone and watch APKs use the same Android module and the
+`GYMMANE_TEST_BUILD` flag. The phone starts at `lib/main.dart` and the watch
+at `lib/main_wear_companion.dart`. The standard build selects the upstream
+phone or standalone Wear OS experience. The companion keeps the live workout,
+cached home data and pending operations in local journals. The phone remains
+the workout history store.
 
 The companion reuses `WearPage`, `WearButton`, `WearIconButton`, `WearClock`,
 `WearRotary`, `AppTheme`, `GymColors` and the ARB strings. It does not reuse the
@@ -74,8 +63,9 @@ singleton; the companion reads a remote snapshot instead.
 The phone never scans. The watch never scans. The watch lists its
 already-bonded devices and connects to the phone's address. This avoids
 `BLUETOOTH_SCAN` and location permissions entirely. The user pairs the watch
-and phone once in the operating system, then authorizes the GymMane apps with
-a six-digit code shown on the phone.
+and phone in the operating system, then enrolls the bonded device during the
+phone's enrollment window. The current companion can enroll through the
+existing bond without manual PIN entry; the protocol also retains a PIN flow.
 
 If a Wear OS build does not expose the phone in `bondedDevices`, the documented
 fallback is to pair from system settings again; a scan-based fallback is

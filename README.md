@@ -165,6 +165,9 @@ which APK? Take `arm64-v8a`.
 | Wear OS 3+ | Beta, see [WEAR.md](WEAR.md) |
 | iOS 15+ | In progress |
 
+This fork also includes an experimental companion for live phone–watch
+workout sync. See the [companion build and test guide](docs/wearos/README.md).
+
 ### Self-hosted
 
 The full app also runs in the browser from your own server, laid out for big

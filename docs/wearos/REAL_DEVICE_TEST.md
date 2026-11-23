@@ -138,7 +138,7 @@ not used by the GymMane phone-watch link.
 The Galaxy Watch4 and HONOR must first be paired in system settings, normally
 through Samsung's Galaxy Wearable setup. Confirm that Bluetooth is on and each
 device shows the other as paired/bonded in its Bluetooth settings. This is
-separate from the GymMane six-digit authorization code.
+separate from GymMane's enrollment window for the already bonded device.
 
 Do not proceed with the companion pairing if the watch's GymMane device list
 does not include the HONOR. The implementation deliberately does not scan for
@@ -494,7 +494,7 @@ Redacted log file names, if any:
 | `not_bonded` | Re-establish the OS bond through Samsung/Galaxy Wearable or system Bluetooth settings. Do not try an unbonded phone. |
 | Phone reports unsupported or enable fails | BLE integration requires API 31+, Bluetooth enabled, and Nearby devices permission. The phone must expose BLE peripheral advertising and a GATT server. |
 | Phone waits forever; watch cannot connect | Keep the phone app open/foreground, check the phone still shows pairing mode, verify the code has not expired, and confirm Bluetooth is on. HONOR advertising/GATT support must be measured on the handset; the build cannot prove it. |
-| Wrong PIN / pairing times out | Tap **PAIR A WATCH** again and enter the current six-digit code within two minutes. |
+| Enrollment times out | Open **Pair a watch** again on the phone and select the bonded phone on the watch. Enter a PIN only if testing a build that explicitly requests one. |
 | Watch says `Phone not connected` | Check the phone status, bonded phone choice, Bluetooth permissions and that the phone app process is still alive. Reopen the phone app to restart advertising. |
 | Link drops when backgrounded or screen is off | Both apps declare an active-workout foreground service, but Android/OEM may still restrict background work. Reconnect and record the behavior instead of changing system settings during the first test. |
 | ADB watch disappears after Wi-Fi is disabled | Expected for wireless ADB. The Bluetooth app link can remain active. Re-enable Wi-Fi and reconnect ADB to retrieve logs. |
