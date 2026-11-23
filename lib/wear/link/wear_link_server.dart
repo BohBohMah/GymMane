@@ -292,7 +292,7 @@ class WearLinkServer {
   }
 
   Future<void> _start() async {
-    final result = await _invokeWithPermission('startServer');
+    final result = await _channel.invokeMethod<Map>('startServer');
     status.value = WearLinkStatus.fromMap(result);
     wearLinkDiagnostic(
       'phone server start enabled=${status.value.enabled} '
@@ -310,7 +310,7 @@ class WearLinkServer {
       status.value = WearLinkStatus.fromMap(await _readStatus());
       return;
     }
-    final result = await _invokeWithPermission('startServer');
+    final result = await _channel.invokeMethod<Map>('startServer');
     final next = WearLinkStatus.fromMap(result);
     status.value = next;
     fit.setWearLink(next.enabled);
@@ -323,7 +323,7 @@ class WearLinkServer {
 
   Future<WearLinkStatus> beginPairing() async {
     if (!_supported) return const WearLinkStatus();
-    final result = await _invokeWithPermission('beginPairing');
+    final result = await _channel.invokeMethod<Map>('beginPairing');
     final next = WearLinkStatus.fromMap(result);
     status.value = next;
     return next;
@@ -367,15 +367,6 @@ class WearLinkServer {
     } catch (_) {
       return null;
     }
-  }
-
-  Future<Map<dynamic, dynamic>?> _invokeWithPermission(String method) async {
-    var result = await _channel.invokeMethod<Map>(method);
-    if (result?['code'] == 'permission') {
-      await _channel.invokeMethod<Map>('requestPermissions');
-      result = await _channel.invokeMethod<Map>(method);
-    }
-    return result;
   }
 
   /// Pushes are serialized so a snapshot built before a command can never

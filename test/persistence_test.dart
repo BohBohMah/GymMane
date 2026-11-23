@@ -190,12 +190,12 @@ void main() {
       return raw;
     }
 
-    void same() {
-      fit.persistNow();
+    Future<void> same() async {
+      await fit.persistNow();
       expect(jsonEncode(Store.instance.load()), jsonEncode(stored()));
     }
 
-    test('lo guardado es igual que toJson, también tras editar entrenos y comidas', () {
+    test('lo guardado es igual que toJson, también tras editar entrenos y comidas', () async {
       for (var i = 0; i < 5; i++) {
         fit.sessions.add(LoggedSession(DateTime(2026, 3, 1 + i, 18), 3600, [
           LoggedExercise(kFirstId, 'Bench', 'chest', [LoggedSet(8, 60), LoggedSet(6, 70)]),
@@ -203,33 +203,33 @@ void main() {
       }
       final food = fit.saveFood(name: 'Avena', macros: const Macros(kcal: 380, protein: 13, carbs: 60, fat: 7));
       fit.logFood(food, meal: Meal.breakfast);
-      same();
+      await same();
 
       fit.sessions[1].name = 'Pierna';
-      same();
+      await same();
       fit.sessions[2].durationSec = 100;
-      same();
+      await same();
       fit.sessions[3].exercises.first.sets[0] = LoggedSet(10, 65, rpe: 8);
-      same();
+      await same();
       fit.sessions[3].exercises.first.sets.add(LoggedSet(5, 75));
-      same();
+      await same();
       fit.sessions[4].exercises.first.incline = 3;
-      same();
+      await same();
       fit.sessions[0].exercises.add(LoggedExercise(kFirstId, 'Bench', 'chest', [LoggedSet(1, 1)]));
-      same();
+      await same();
       fit.sessions.removeAt(2);
-      same();
+      await same();
       fit.logFood(food, servings: 2, meal: Meal.lunch);
-      same();
+      await same();
       fit.foodLog.removeAt(0);
-      same();
+      await same();
     });
 
-    test('un NaN no rompe el guardado', () {
+    test('un NaN no rompe el guardado', () async {
       fit.sessions.add(LoggedSession(DateTime(2026, 3, 1, 18), 60, [
         LoggedExercise(kFirstId, 'Bench', 'chest', [LoggedSet(8, double.nan)]),
       ]));
-      fit.persistNow();
+      await fit.persistNow();
       final back = Store.instance.load();
       expect(((back['sessions'] as List).single as Map)['ex'], isNotEmpty);
     });

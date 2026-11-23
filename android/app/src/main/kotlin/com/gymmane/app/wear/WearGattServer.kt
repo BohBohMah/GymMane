@@ -61,7 +61,7 @@ class WearGattServer(
     private var tx: BluetoothGattCharacteristic? = null
 
     private var connected: BluetoothDevice? = null
-    private var reader = FrameReader()
+    private val reader = FrameReader()
     private var handshake: PhoneHandshake? = null
     private var session: SecureSession? = null
     private var mtu = 23
@@ -69,10 +69,13 @@ class WearGattServer(
     private val queue = ArrayDeque<ByteArray>()
     private var sending = false
     private var closeAfterSend = false
+    private var disconnecting = false
     private var subscribed = false
     private val handshakeTimeout = Runnable {
         if (connected != null && session == null) fail("handshake_timeout")
     }
+    private val indicationTimeout = Runnable { if (sending) fail("indication_timeout") }
+    private val disconnectTimeout = Runnable { if (disconnecting) recoverTransport() }
     private var serviceReady = false
     private var lastSnapshot: String? = null
     private var lastHomeSent: JsonObject? = null
@@ -219,18 +222,8 @@ class WearGattServer(
     private fun closeTransport() {
         main.removeCallbacks(retryTransport)
         main.removeCallbacks(registrationTimeout)
-        main.removeCallbacks(handshakeTimeout)
         stopAdvertising()
-        session = null
-        handshake = null
-        reader.reset()
-        queue.clear()
-        pendingHome = null
-        handlingCommands = 0
-        sending = false
-        closeAfterSend = false
-        subscribed = false
-        connected = null
+        resetPeer()
         gattCallback = null
         val server = gattServer
         gattServer = null
@@ -238,6 +231,25 @@ class WearGattServer(
         serviceReady = false
         rx = null
         tx = null
+    }
+
+    private fun resetPeer() {
+        main.removeCallbacks(handshakeTimeout)
+        main.removeCallbacks(indicationTimeout)
+        main.removeCallbacks(disconnectTimeout)
+        connected = null
+        session = null
+        handshake = null
+        reader.reset()
+        queue.clear()
+        lastHomeSent = null
+        pendingHome = null
+        handlingCommands = 0
+        sending = false
+        closeAfterSend = false
+        disconnecting = false
+        subscribed = false
+        mtu = 23
     }
 
     @SuppressLint("MissingPermission")
@@ -378,7 +390,7 @@ class WearGattServer(
         ) {
             onMain {
                 if (gattCallback !== this) return@onMain
-                if (device != connected || !subscribed || characteristic.uuid != WearUuids.RX ||
+                if (device != connected || disconnecting || !subscribed || characteristic.uuid != WearUuids.RX ||
                     preparedWrite || offset != 0 || value.isEmpty() || value.size > 512
                 ) {
                     if (responseNeeded) {
@@ -406,7 +418,7 @@ class WearGattServer(
                 if (gattCallback !== this) return@onMain
                 val enabled = value.contentEquals(BluetoothGattDescriptor.ENABLE_INDICATION_VALUE)
                 val disabled = value.contentEquals(BluetoothGattDescriptor.DISABLE_NOTIFICATION_VALUE)
-                val valid = device == connected && descriptor.uuid == CCCD &&
+                val valid = device == connected && !disconnecting && descriptor.uuid == CCCD &&
                     descriptor.characteristic.uuid == WearUuids.TX && !preparedWrite &&
                     offset == 0 && (enabled || disabled)
                 if (valid) subscribed = enabled
@@ -441,13 +453,13 @@ class WearGattServer(
 
         override fun onNotificationSent(device: BluetoothDevice, status: Int) {
             onMain {
-                if (gattCallback !== this || device != connected) return@onMain
+                if (gattCallback !== this || device != connected || !sending) return@onMain
+                main.removeCallbacks(indicationTimeout)
                 sending = false
                 WearLinkDiagnostics.log(
                     "phone indication completed status=$status remainingChunks=${queue.size}",
                 )
                 if (status != BluetoothGatt.GATT_SUCCESS) {
-                    queue.clear()
                     fail("indication_$status")
                     return@onMain
                 }
@@ -463,24 +475,14 @@ class WearGattServer(
             runCatching { gattServer?.cancelConnection(device) }
             return
         }
-        if (connected != null && connected?.address != device.address) {
-            runCatching { gattServer?.cancelConnection(device) }
+        val peer = connected
+        if (peer != null) {
+            if (peer != device) runCatching { gattServer?.cancelConnection(device) }
             return
         }
         connected = device
-        session = null
-        lastHomeSent = null
-        pendingHome = null
-        handlingCommands = 0
-        subscribed = false
-        main.removeCallbacks(handshakeTimeout)
         val timeout = if (pairingActive) 125_000L else 15_000L
         main.postDelayed(handshakeTimeout, timeout)
-        reader = FrameReader()
-        queue.clear()
-        sending = false
-        closeAfterSend = false
-        mtu = 23
         handshake = PhoneHandshake(
             phoneName = phoneName(),
             pskFor = { prefs.pskFor(it) },
@@ -497,17 +499,7 @@ class WearGattServer(
 
     private fun onDisconnected(device: BluetoothDevice) {
         if (connected?.address != device.address) return
-        connected = null
-        subscribed = false
-        main.removeCallbacks(handshakeTimeout)
-        session = null
-        handshake = null
-        reader.reset()
-        queue.clear()
-        sending = false
-        closeAfterSend = false
-        pendingHome = null
-        handlingCommands = 0
+        resetPeer()
         if (prefs.serverEnabled) advertise()
         WearLinkDiagnostics.log("phone GATT peer disconnected; advertising=${prefs.serverEnabled}")
         emit()
@@ -656,15 +648,14 @@ class WearGattServer(
 
     @SuppressLint("MissingPermission")
     private fun pump() {
-        if (sending) return
+        if (sending || disconnecting) return
         val device = connected ?: return
         val server = gattServer ?: return
         val characteristic = tx ?: return
         val chunk = queue.removeFirstOrNull()
         if (chunk == null) {
             if (closeAfterSend) {
-                closeAfterSend = false
-                runCatching { server.cancelConnection(device) }
+                disconnectPeer()
             } else if (handlingCommands == 0) {
                 val home = pendingHome ?: return
                 pendingHome = null
@@ -688,27 +679,39 @@ class WearGattServer(
             false
         }
         if (!sent) {
-            sending = false
             WearLinkDiagnostics.log("phone indication start failed queued=${queue.size}")
-            queue.clear()
             fail("notify_failed")
         } else {
+            main.postDelayed(indicationTimeout, GATT_CALLBACK_TIMEOUT_MS)
             WearLinkDiagnostics.log("phone indication started queued=${queue.size}")
         }
     }
 
     private fun disconnectWhenDrained() {
         closeAfterSend = true
-        if (!sending && queue.isEmpty()) {
-            closeAfterSend = false
-            val device = connected
-            if (device != null) runCatching { gattServer?.cancelConnection(device) }
-        }
+        if (!sending && queue.isEmpty()) disconnectPeer()
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun disconnectPeer() {
+        val device = connected ?: return
+        if (disconnecting) return
+        disconnecting = true
+        main.removeCallbacks(handshakeTimeout)
+        main.removeCallbacks(indicationTimeout)
+        sending = false
+        queue.clear()
+        session = null
+        handshake = null
+        emit()
+        // Some controllers never report a disconnect after a failed indication.
+        main.postDelayed(disconnectTimeout, GATT_CALLBACK_TIMEOUT_MS)
+        runCatching { gattServer?.cancelConnection(device) }.onFailure { recoverTransport() }
     }
 
     private fun fail(reason: String) {
         onEvent(statusMap() + ("error" to reason))
-        disconnectWhenDrained()
+        disconnectPeer()
     }
 
     private fun phoneName(): String = Build.MODEL?.takeIf { it.isNotBlank() } ?: "GymMane Phone"
@@ -748,6 +751,7 @@ class WearGattServer(
     }
 
     companion object {
+        private const val GATT_CALLBACK_TIMEOUT_MS = 8_000L
         private val CCCD = java.util.UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
     }
 }

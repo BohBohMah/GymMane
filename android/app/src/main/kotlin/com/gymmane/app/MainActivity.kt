@@ -288,7 +288,7 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
-        if (WearLinkBridge.onPermissionResult(requestCode, grantResults)) return
+        if (WearLinkBridge.onPermissionResult(this, requestCode, grantResults)) return
         if (HealthBridge.onPermissionResult(requestCode, grantResults)) return
         if (WatchLinkBridge.onPermissionResult(requestCode, grantResults)) return
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)

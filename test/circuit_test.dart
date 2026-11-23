@@ -35,10 +35,10 @@ void main() {
         reason: 'la pausa del último paso no cuenta: tras él va el descanso de ronda');
   });
 
-  test('un circuito se guarda, vuelve igual al reabrir y se borra', () {
+  test('un circuito se guarda, vuelve igual al reabrir y se borra', () async {
     final c = navySeal();
     fit.saveCircuit(c);
-    fit.persistNow();
+    await fit.persistNow();
     fit.loadFromStore();
     final back = fit.circuitById(c.id)!;
     expect(back.name, 'Navy Seal');

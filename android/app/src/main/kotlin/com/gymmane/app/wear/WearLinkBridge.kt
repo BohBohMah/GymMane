@@ -9,12 +9,6 @@ import com.gymmane.app.CompanionTiles
 import io.flutter.plugin.common.MethodChannel
 import org.json.JSONObject
 
-/**
- * Flutter bridge for the direct phone/watch link. It exposes both roles on the
- * same channel: the phone advertises as a GATT peripheral, the watch connects
- * as a GATT client to an already bonded phone. No Internet transport, no Wear
- * Data Layer, no scanning.
- */
 object WearLinkBridge {
     const val CHANNEL = "gymmane/wearlink"
     private const val REQUEST = 7412
@@ -28,11 +22,16 @@ object WearLinkBridge {
     private var lastJson: String? = null
     private var workoutServiceActive = false
 
-    private var pendingResult: MethodChannel.Result? = null
-    private var pendingAction: (() -> Any?)? = null
-    private var pendingAdvertise = true
+    private data class PermissionRequest(
+        val result: MethodChannel.Result,
+        val requiresAdvertising: Boolean,
+        val action: () -> Any?,
+    )
+
+    private var permissionRequest: PermissionRequest? = null
 
     fun attach(activity: Activity, channel: MethodChannel) {
+        this.activity?.takeIf { it !== activity }?.let(::detach)
         this.activity = activity
         this.channel = channel
         WearLinkDiagnostics.initialize(activity.applicationContext)
@@ -59,23 +58,10 @@ object WearLinkBridge {
                     lastJson = call.argument<String>("json")
                     server?.updateSnapshot(lastJson ?: "")
                     val active = runCatching {
-                        val status = JSONObject(lastJson ?: "{}").optString("status")
-                        status == "active" || status == "paused" || status == "parked"
+                        isWorkoutOngoing(JSONObject(lastJson ?: "{}").optString("status"))
                     }.getOrDefault(false)
-                    if (!isWatch() && active && !workoutServiceActive) {
-                        requestNotificationPermission()
-                        workoutServiceActive = activity?.applicationContext?.let {
-                            WearWorkoutService.start(it)
-                        } == true
-                    } else if (!isWatch() && !active && workoutServiceActive) {
-                        activity?.applicationContext?.let { WearWorkoutService.stop(it) }
-                        workoutServiceActive = false
-                    }
+                    if (!isWatch()) updateWorkoutService(activity.applicationContext, active)
                     result.success(null)
-                }
-                "requestPermissions" -> {
-                    requestPermissions(true)
-                    result.success(serverStatus())
                 }
                 "bondedDevices" -> ensure(false, result) { bondedDevicesList() }
                 "startClient" -> {
@@ -99,11 +85,9 @@ object WearLinkBridge {
                 "forgetPhone" -> result.success(forgetPhone())
                 "sendCommand" -> {
                     val raw = call.arguments
-                    if (raw is Map<*, *>) {
-                        val map = raw.entries
-                            .filter { it.key is String }
-                            .associate { it.key as String to it.value }
-                        client?.sendCommand(map)
+                    val command = asMap(raw)
+                    if (command != null) {
+                        client?.sendCommand(command)
                         result.success(null)
                     } else {
                         result.error("bad-command", "command must be a map", null)
@@ -125,46 +109,36 @@ object WearLinkBridge {
 
     fun detach(activity: Activity) {
         if (this.activity !== activity) return
-        if (!workoutServiceActive) {
-            server?.stop()
-            server = null
-            lastJson = null
-        }
-        if (!workoutServiceActive) {
-            client?.shutdown()
-            client = null
-        }
-        pendingResult = null
-        pendingAction = null
+        val request = permissionRequest
+        permissionRequest = null
+        request?.result?.success(deniedMap())
         channel?.setMethodCallHandler(null)
         channel = null
         this.activity = null
+        if (!workoutServiceActive) closeTransport()
     }
 
     fun onWorkoutServiceStopped() {
         workoutServiceActive = false
-        if (activity == null) {
-            client?.shutdown()
-            client = null
-        }
+        if (activity == null) closeTransport()
     }
 
-    fun onPermissionResult(requestCode: Int, grantResults: IntArray): Boolean {
+    private fun closeTransport() {
+        server?.stop()
+        server = null
+        lastJson = null
+        client?.shutdown()
+        client = null
+    }
+
+    fun onPermissionResult(owner: Activity, requestCode: Int, grantResults: IntArray): Boolean {
         if (requestCode == NOTIFICATION_REQUEST) return true
         if (requestCode != REQUEST) return false
-        val result = pendingResult
-        val action = pendingAction
-        pendingResult = null
-        pendingAction = null
-        if (result != null) {
-            val granted = grantResults.isNotEmpty() &&
-                grantResults.all { it == PackageManager.PERMISSION_GRANTED }
-            if (granted && action != null) {
-                result.success(action())
-            } else {
-                result.success(deniedMap())
-            }
-        }
+        if (activity !== owner) return true
+        val request = permissionRequest ?: return true
+        permissionRequest = null
+        val granted = grantResults.isNotEmpty() && missing(request.requiresAdvertising).isEmpty()
+        request.result.success(if (granted) request.action() else deniedMap())
         return true
     }
 
@@ -179,26 +153,30 @@ object WearLinkBridge {
             result.success(action())
             return
         }
-        pendingResult?.success(deniedMap())
-        pendingResult = result
-        pendingAction = action
-        pendingAdvertise = advertise
+        if (permissionRequest != null) {
+            result.success(deniedMap())
+            return
+        }
+        permissionRequest = PermissionRequest(result, advertise, action)
         try {
             current.requestPermissions(missing, REQUEST)
         } catch (_: Exception) {
-            pendingResult = null
-            pendingAction = null
+            permissionRequest = null
             result.success(deniedMap())
         }
     }
 
-    private fun requestPermissions(advertise: Boolean) {
-        val current = activity ?: return
-        val missing = missing(advertise)
-        if (missing.isEmpty()) return
-        try {
-            current.requestPermissions(missing, REQUEST)
-        } catch (_: Exception) {
+    private fun isWorkoutOngoing(status: Any?): Boolean =
+        status == "active" || status == "paused" || status == "parked"
+
+    private fun updateWorkoutService(context: Context, active: Boolean) {
+        if (active == workoutServiceActive) return
+        if (active) {
+            requestNotificationPermission()
+            workoutServiceActive = WearWorkoutService.start(context)
+        } else {
+            WearWorkoutService.stop(context)
+            workoutServiceActive = false
         }
     }
 
@@ -432,26 +410,7 @@ object WearLinkBridge {
             onState = { state ->
                 latestTileState = state
                 CompanionTiles.save(appContext, state)
-                val status = state["status"] as? String
-                val active = status == "active" || status == "paused" || status == "parked"
-                if (active && !workoutServiceActive) {
-                    val foreground = activity
-                    if (Build.VERSION.SDK_INT >= 33 && foreground != null &&
-                        foreground.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
-                            PackageManager.PERMISSION_GRANTED
-                    ) {
-                        runCatching {
-                            foreground.requestPermissions(
-                                arrayOf(Manifest.permission.POST_NOTIFICATIONS),
-                                NOTIFICATION_REQUEST,
-                            )
-                        }
-                    }
-                    workoutServiceActive = WearWorkoutService.start(appContext)
-                } else if (!active && workoutServiceActive) {
-                    WearWorkoutService.stop(appContext)
-                    workoutServiceActive = false
-                }
+                updateWorkoutService(appContext, isWorkoutOngoing(state["status"]))
                 channel?.invokeMethod("state", state - "home")
             },
             onHome = { home ->

@@ -155,7 +155,7 @@ void main() {
       routineWithThree();
       start();
       fit.removeSessionExercise(0);
-      fit.persistNow();
+      await fit.persistNow();
 
       fit.session = null;
       fit.loadFromStore();

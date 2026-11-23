@@ -321,7 +321,7 @@ void main() {
     expect(fit.multiPlan, isTrue);
     expect(fit.customExercises.single.aliases, ['Bulgarian split squat']);
 
-    fit.persistNow();
+    await fit.persistNow();
     fit.loadFromStore();
     expect(fit.restFor(squat.id), 0);
     expect(fit.heatTone, 'green');
@@ -366,7 +366,7 @@ void main() {
     expect(fit.hcWrite, isTrue);
     expect(fit.hcWeights, isTrue);
 
-    fit.persistNow();
+    await fit.persistNow();
     fit.loadFromStore();
     expect(fit.circuits.single.name, 'Core rápido');
     expect(fit.fasting, isTrue);

@@ -70,9 +70,9 @@ void main() {
       expect(seeded, fit.pickSeed);
     });
 
-    test('hidden exercises survive a restart', () {
+    test('hidden exercises survive a restart', () async {
       fit.toggleSuggest(idOf('Barbell Bench Press'));
-      fit.persistNow();
+      await fit.persistNow();
       fit.loadFromStore();
       expect(fit.suggests(idOf('Barbell Bench Press')), isFalse);
     });

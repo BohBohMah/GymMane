@@ -147,7 +147,7 @@ void main() {
     expect(fit.quickPass!.id, gym);
     fit.setQuickPass(pool);
     expect(fit.quickPass!.id, pool);
-    fit.persistNow();
+    await fit.persistNow();
     fit.loadFromStore();
     expect(fit.quickPass!.id, pool);
     fit.removeGymPass(pool);

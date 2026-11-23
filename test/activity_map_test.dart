@@ -150,10 +150,10 @@ void main() {
       expect(cells[cells.length - 7 + fit.todayIndex], greaterThan(0));
     });
 
-    test('los días y meses vienen encendidos y apagarlos se guarda', () {
+    test('los días y meses vienen encendidos y apagarlos se guarda', () async {
       expect(fit.heatmapLabels, isTrue);
       fit.toggleHeatmapLabels();
-      fit.persistNow();
+      await fit.persistNow();
       fit.loadFromStore();
       expect(fit.heatmapLabels, isFalse);
     });

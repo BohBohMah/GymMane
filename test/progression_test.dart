@@ -464,13 +464,13 @@ void main() {
       expect(next.weightKg, greaterThan(60));
     });
 
-    test('un ejercicio apagado a mano sigue apagado con la progresión por defecto', () {
+    test('un ejercicio apagado a mano sigue apagado con la progresión por defecto', () async {
       final id = bench();
       fit.setAutoProgress('weight');
       expect(fit.hasProgress(id), isTrue);
       fit.toggleProgress(id);
       expect(fit.hasProgress(id), isFalse);
-      fit.persistNow();
+      await fit.persistNow();
       fit.loadFromStore();
       expect(fit.autoProgress, 'weight');
       expect(fit.hasProgress(id), isFalse);

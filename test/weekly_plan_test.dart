@@ -29,7 +29,7 @@ void main() {
       return DateTime(n.year, n.month, n.day + offset, 10);
     }
 
-    test('pasa a otro día sin tocar el plan semanal y se deshace', () {
+    test('pasa a otro día sin tocar el plan semanal y se deshace', () async {
       final a = routine('A');
       final today = DateTime.now();
       fit.assignRoutineToDay(today.weekday, a.id);
@@ -41,7 +41,7 @@ void main() {
       expect(fit.movedOn(today), isTrue);
       expect(fit.isTrainingDay(today), isFalse);
 
-      fit.persistNow();
+      await fit.persistNow();
       fit.planMoves.clear();
       fit.loadFromStore();
       expect(fit.routinesOn(day(2)).single.id, a.id);

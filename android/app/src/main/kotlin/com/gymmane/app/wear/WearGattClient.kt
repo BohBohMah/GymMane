@@ -49,7 +49,7 @@ class WearGattClient(
     private var gatt: BluetoothGatt? = null
     private var rx: BluetoothGattCharacteristic? = null
     private var tx: BluetoothGattCharacteristic? = null
-    private var reader = FrameReader()
+    private val reader = FrameReader()
     private var handshake: WatchHandshake? = null
     private var session: SecureSession? = null
     private var mtu = 23
@@ -69,6 +69,7 @@ class WearGattClient(
     private val watchdog = Runnable {
         if (session == null && gatt != null) fail("connection_timeout")
     }
+    private val writeTimeout = Runnable { if (sending) fail("write_timeout") }
 
     val supported: Boolean
         get() = Build.VERSION.SDK_INT >= 31 &&
@@ -276,6 +277,7 @@ class WearGattClient(
         indicationReady = false
         awaitingPin = false
         main.removeCallbacks(watchdog)
+        main.removeCallbacks(writeTimeout)
         if (current != null) {
             runCatching { current.disconnect() }
             runCatching { current.close() }
@@ -416,13 +418,14 @@ class WearGattClient(
             }
         }
 
-    override fun onCharacteristicWrite(
+        override fun onCharacteristicWrite(
             gatt: BluetoothGatt,
             characteristic: BluetoothGattCharacteristic,
             status: Int,
         ) {
             onMain {
-                if (gatt !== this@WearGattClient.gatt) return@onMain
+                if (gatt !== this@WearGattClient.gatt || characteristic.uuid != WearUuids.RX || !sending) return@onMain
+                main.removeCallbacks(writeTimeout)
                 sending = false
                 if (status != BluetoothGatt.GATT_SUCCESS) {
                     WearLinkDiagnostics.log("watch write callback failed status=$status")
@@ -592,6 +595,7 @@ class WearGattClient(
             WearLinkDiagnostics.log("watch write start failed queued=${queue.size}")
             fail("write_failed")
         } else {
+            main.postDelayed(writeTimeout, WRITE_TIMEOUT_MS)
             WearLinkDiagnostics.log("watch write started queued=${queue.size}")
         }
     }
@@ -612,6 +616,7 @@ class WearGattClient(
     companion object {
         private const val CONNECTION_STALL_MS = 12_000L
         private const val PENDING_CONNECTION_STALL_MS = 5_000L
+        private const val WRITE_TIMEOUT_MS = 8_000L
         private val CCCD: UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
     }
 }

@@ -91,7 +91,9 @@ class WearLinkClient {
     if (!_supported || _attached) return;
     _attached = true;
     _channel.setMethodCallHandler(_onNativeCall);
-    unawaited(_ensureJournal());
+    unawaited(_ensureJournal().catchError((Object error) {
+      wearLinkDiagnostic('watch journal initialization failed type=${error.runtimeType}');
+    }));
     if (Platform.isAndroid) {
       _reconnectTimer ??= Timer.periodic(const Duration(seconds: 8), (_) {
         final current = status.value;
@@ -102,17 +104,22 @@ class WearLinkClient {
     }
   }
 
-  Future<void> _ensureJournal() => _initializing ??= () async {
-    if (_journal != null) return;
+  Future<void> _ensureJournal() => _initializing ??= _openJournals().onError((Object error, StackTrace stack) {
+    _initializing = null;
+    Error.throwWithStackTrace(error, stack);
+  });
+
+  Future<void> _openJournals() async {
     if (debugSupportedOverride == true && !Platform.isAndroid) {
       _journal = WearOfflineJournal(write: (_) async {});
       _nutrition = WearNutritionJournal(write: (_) async {});
     } else {
       final directory = await getApplicationSupportDirectory();
-      _journal = await WearOfflineJournalFile(directory).open();
+      final journal = await WearOfflineJournalFile(directory).open();
       final file = WearJournalFile(directory, 'wear_nutrition_journal_v1.json');
       final nutrition = WearNutritionJournal(write: file.write);
       await file.restore(nutrition.restore);
+      _journal = journal;
       _nutrition = nutrition;
     }
     final saved = _journal?.snapshot;
@@ -121,7 +128,7 @@ class WearLinkClient {
     }
     _publishJournal();
     _publishNutrition();
-  }();
+  }
 
   @visibleForTesting
   void resetForTest() {

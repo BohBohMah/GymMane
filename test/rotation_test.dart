@@ -68,7 +68,7 @@ void main() {
       expect(fit.rotationStep, 0);
     });
 
-    test('se guarda, y borrar una rutina pasa a la siguiente', () {
+    test('se guarda, y borrar una rutina pasa a la siguiente', () async {
       final a = routine('A'), b = routine('B'), c = routine('C');
       fit.setRotation(true);
       for (final r in [a, b, c]) {
@@ -78,7 +78,7 @@ void main() {
       fit.reorderRotation(2, 0);
       expect(fit.rotationIds, [c.id, a.id, b.id]);
 
-      fit.persistNow();
+      await fit.persistNow();
       fit.rotationIds.clear();
       fit.rotation = false;
       fit.loadFromStore();
@@ -209,11 +209,11 @@ void main() {
       expect(fit.routinesOn(DateTime.now()).single.id, a.id);
     });
 
-    test('nada de rutinas vacías ni ids sueltos al cargar', () {
+    test('nada de rutinas vacías ni ids sueltos al cargar', () async {
       final a = routine('A'), b = routine('B');
       rotate([a, b]);
       fit.rotationIds.add('no-existe');
-      fit.persistNow();
+      await fit.persistNow();
       fit.loadFromStore();
       expect(fit.rotationRoutines.map((r) => r.id), [a.id, b.id]);
     });
@@ -350,13 +350,13 @@ void main() {
       expect(fit.todayRoutine?.id, push.id);
     });
 
-    test('varios descansos, se mueven y se guardan con su día', () {
+    test('varios descansos, se mueven y se guardan con su día', () async {
       final legs = routine('Legs'), push = routine('Push');
       final ids = cycle([legs, 'rest', push, 'rest']);
       expect(ids[1], isNot(ids[3]));
       train(legs, on: day(-1));
 
-      fit.persistNow();
+      await fit.persistNow();
       fit.rotationIds.clear();
       fit.rotationRestDay = null;
       fit.loadFromStore();

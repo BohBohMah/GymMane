@@ -116,10 +116,10 @@ void main() {
     expect(fit.placeExerciseCount(place), greaterThan(50));
   });
 
-  test('places survive a save and a reload, and the active one with them', () {
+  test('places survive a save and a reload, and the active one with them', () async {
     final id = fit.addPlace('Gimnasio', equipment: {'Barbell', 'Machine'});
     fit.setActivePlace(id);
-    fit.persistNow();
+    await fit.persistNow();
 
     fit.places.clear();
     fit.activePlaceId = '';
@@ -140,7 +140,7 @@ void main() {
     expect(fit.exercisesFiltered.length, fit.allExercises.length);
   });
 
-  test('the dumbbells you own steer the weights of dumbbell work here, and only here', () {
+  test('the dumbbells you own steer the weights of dumbbell work here, and only here', () async {
     final id = fit.addPlace('Casa', equipment: {'Dumbbell', 'Barbell'});
     for (final kg in [12.5, 5.0, 10.0, 7.5]) {
       fit.toggleDumbbell(id, kg);
@@ -155,7 +155,7 @@ void main() {
     expect(fit.ownStackFor(curl), isNull);
     expect(fit.stackFor(bar), isNull);
     expect(fit.snapToStack(curl, 10, dir: 1), 12.5);
-    fit.persistNow();
+    await fit.persistNow();
     fit.places.clear();
     fit.loadFromStore();
     expect(fit.places.single.dumbbells, [5.0, 10.0, 12.5]);

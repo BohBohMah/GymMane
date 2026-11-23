@@ -77,10 +77,10 @@ void main() {
   });
 
   group('#281 estado de salud', () {
-    test('lo elegido y los datos se guardan y vuelven al reabrir', () {
+    test('lo elegido y los datos se guardan y vuelven al reabrir', () async {
       fit.healthShown.addAll({HealthMetric.sleep, HealthMetric.restingHr});
       fit.healthByDay[HealthMetric.restingHr] = {key(0): [58], key(2): [61]};
-      fit.persistNow();
+      await fit.persistNow();
       fit.healthShown.clear();
       fit.healthByDay.clear();
       fit.loadFromStore();

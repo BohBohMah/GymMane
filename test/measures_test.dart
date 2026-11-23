@@ -59,10 +59,10 @@ void main() {
     expect(fit.measures, isEmpty);
   });
 
-  test('readings survive a save and a reload', () {
+  test('readings survive a save and a reload', () async {
     fit.addMeasure('thigh', 60);
     fit.addMeasure('bodyfat', 15);
-    fit.persistNow();
+    await fit.persistNow();
 
     fit.measures.clear();
     fit.loadFromStore();
@@ -113,11 +113,11 @@ void main() {
     expect(fit.measures.map((m) => m.key), ['waist']);
   });
 
-  test('custom measures and the reminder survive a reload', () {
+  test('custom measures and the reminder survive a reload', () async {
     final id = fit.addCustomMeasure('Body water', unit: '%', length: false);
     fit.addMeasure(id, 55.5);
     fit.setMeasureEvery(14);
-    fit.persistNow();
+    await fit.persistNow();
     fit.loadFromStore();
     expect(fit.measureTitle(id), 'Body water');
     expect(fit.isFreeMeasure(id), isTrue);
@@ -162,11 +162,11 @@ void main() {
     expect(fit.measureHeadline(fit.latestMeasure('bp')!), '118/76');
   });
 
-  test('notes, sides and blood pressure survive a reload', () {
+  test('notes, sides and blood pressure survive a reload', () async {
     fit.toggleSidedMeasure('thigh');
     fit.addMeasure('thigh', 0, left: 58, right: 57.5, note: 'n');
     fit.addPressure(120, 80, pulse: 70);
-    fit.persistNow();
+    await fit.persistNow();
     fit.loadFromStore();
     expect(fit.isSidedMeasure('thigh'), isTrue);
     final th = fit.latestMeasure('thigh')!;

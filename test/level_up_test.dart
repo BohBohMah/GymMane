@@ -202,10 +202,10 @@ void main() {
       expect(fit.nextStepIn(null, 'uTBt1HV'), 'negative-pull-up', reason: 'fuera de la rutina, la de la app');
     });
 
-    test('se guarda, se copia al duplicar y una cadena de un paso no cuenta', () {
+    test('se guarda, se copia al duplicar y una cadena de un paso no cuenta', () async {
       final r = routineWith([pushUp]);
       fit.setLadder(r.id, pushUp, [pushUp, diamond]);
-      fit.persistNow();
+      await fit.persistNow();
       fit.loadFromStore();
       final back = fit.routineById(r.id)!;
       expect(back.ladders, [[pushUp, diamond]]);

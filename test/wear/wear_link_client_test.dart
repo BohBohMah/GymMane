@@ -95,7 +95,6 @@ void main() {
     messenger.setMockMethodCallHandler(_channel, (call) async {
       calls.add(call);
       if (call.method == 'sendCommand') return null;
-      if (call.method == 'requestPermissions') return null;
       if (call.method == 'clientStatus') return _connected;
       return null;
     });

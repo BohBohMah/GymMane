@@ -200,7 +200,7 @@ void main() {
       expect(fit.isEachSide('side-plank-hold'), isFalse);
       expect(fit.isEachSide('plank-hold'), isTrue);
 
-      fit.persistNow();
+      await fit.persistNow();
       fit.eachSide.clear();
       fit.eachSideOff.clear();
       fit.loadFromStore();

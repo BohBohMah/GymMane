@@ -214,13 +214,13 @@ void main() {
       expect(fit.session!.exercises[0].sets[0].weight, 11.3);
     });
 
-    test('la progresión y la descarga caen en la pila', () {
+    test('la progresión y la descarga caen en la pila', () async {
       final id = machine();
       fit.setWeightStack(id, [20, 27.5, 34, 41, 48]);
       expect(fit.snapToStack(id, 34, dir: 1), 41);
       expect(fit.deloadWeight(id, 41), 34);
       expect(fit.floorToStack(id, 30), 27.5);
-      fit.persistNow();
+      await fit.persistNow();
       fit.loadFromStore();
       expect(fit.stackFor(id), [20, 27.5, 34, 41, 48]);
       fit.setWeightStack(id, const []);

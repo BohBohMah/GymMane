@@ -73,7 +73,7 @@ void main() {
         expect(fit.showRoutineRow, isTrue);
         fit.toggleWeekStats();
         fit.toggleRoutineRow();
-        fit.persistNow();
+        await fit.persistNow();
         fit.loadFromStore();
         expect(fit.showWeekStats, isFalse);
         expect(fit.showRoutineRow, isFalse);
@@ -262,11 +262,11 @@ void main() {
         expect(fit.dayOffOn(day), 'rest');
       });
 
-      test('los días libres sobreviven a guardar y cargar', () {
+      test('los días libres sobreviven a guardar y cargar', () async {
         final today = DateTime.now();
         final day = DateTime(today.year, today.month, today.day - 3);
         fit.setDayOff(day, 'injury');
-        fit.persistNow();
+        await fit.persistNow();
         fit.loadFromStore();
         expect(fit.dayOffOn(day), 'injury');
       });

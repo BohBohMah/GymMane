@@ -212,12 +212,12 @@ void main() {
       expect(fit.strengthToWeight(pull, fit.exerciseRecord(pull)), isNull);
     });
 
-    test('el objetivo mide el mejor peso y se guarda con su fecha', () {
+    test('el objetivo mide el mejor peso y se guarda con su fecha', () async {
       fit.sessions.add(logged(DateTime.now(), [LoggedSet(5, 100), LoggedSet(3, 110)]));
       final due = DateTime.now().add(const Duration(days: 30));
       fit.setExerciseGoal(bench, 140, due);
       expect(fit.goalBest(bench), 110);
-      fit.persistNow();
+      await fit.persistNow();
       fit.loadFromStore();
       final g = fit.exerciseGoals[bench]!;
       expect(g.target, 140);

@@ -63,7 +63,7 @@ void main() {
     test('the correction survives a restart', () async {
       final s = log();
       fit.setLoggedReps(s.exercises.single, 1, 6);
-      fit.persistNow();
+      await fit.persistNow();
 
       fit.sessions.clear();
       fit.loadFromStore();

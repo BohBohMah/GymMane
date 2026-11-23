@@ -80,13 +80,13 @@ void main() {
         reason: 'se ganaba en silencio y aparecía en el perfil sin animación');
   });
 
-  test('a medal already celebrated does not come back on the next launch', () {
+  test('a medal already celebrated does not come back on the next launch', () async {
     fit.sessions.add(LoggedSession(DateTime.now(), 1800, const []));
     fit.refreshAwards();
     while (fit.nextCelebration != null) {
       fit.celebrationShown();
     }
-    fit.persistNow();
+    await fit.persistNow();
     fit.loadFromStore();
 
     expect(fit.pendingAwards, isEmpty);
@@ -98,7 +98,7 @@ void main() {
     expect(fit.awardGoal(AwardId.sets1000), 1000);
   });
 
-  test('you pick which won medals show on the profile, and the pick survives a restart', () {
+  test('you pick which won medals show on the profile, and the pick survives a restart', () async {
     fit.profile.medals.clear();
     fit.sessions.addAll([
       for (var i = 0; i < 12; i++) LoggedSession(DateTime.now().subtract(Duration(days: i)), 1800, const []),
@@ -110,7 +110,7 @@ void main() {
     fit.toggleProfileMedal(AwardId.workouts100);
     expect(fit.profileMedals, [AwardId.workouts10], reason: 'una que no tienes no se puede elegir');
 
-    fit.persistNow();
+    await fit.persistNow();
     fit.profile.medals.clear();
     fit.loadFromStore();
     expect(fit.profileMedals, [AwardId.workouts10]);
